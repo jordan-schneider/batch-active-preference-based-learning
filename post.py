@@ -5,8 +5,11 @@
 # import argparse
 
 import logging
+from pathlib import Path
 
+import argh
 import numpy as np
+from argh import arg
 
 from linear_programming import remove_redundant_constraints
 from sampling import Sampler
@@ -15,33 +18,9 @@ from simulation_utils import create_env
 #%%
 
 
-def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--psi",
-        type=argparse.FileType("rb"),
-        required=True,
-        help="File containing psi values (difference in features vectors).",
-    )
-    parser.add_argument(
-        "--s",
-        type=argparse.FileType("rb"),
-        required=True,
-        help="File containing preferences.",
-    )
-    return parser.parse_args()
-
-
-def inside(w: np.array, psi: np.array, s: int) -> bool:
-    """ Determines if w is inside the constraint given by psi and s.
-    psi = phi(trajectory_1) - phi(trajectory_2)
-    w (s * (phi(trajectory_1) - phi(trajectory_2))) > 0
-    so the constraint is true if sign (w psi) == s
-    """
-    return np.sign(np.dot(w, psi)) == s
-
-
-def f(psi, s, n_samples, epsilon=0, delta=0.95, logger=logging.getLogger()):
+def filter_halfplanes(
+    psi, s, n_samples, epsilon=0, delta=0.95, logger=logging.getLogger()
+):
     simulation_object = create_env("driver")
     d = simulation_object.num_of_features
 
@@ -64,14 +43,25 @@ def f(psi, s, n_samples, epsilon=0, delta=0.95, logger=logging.getLogger()):
 #%%
 
 
-def main():
-    args = get_args()
-
-    psi = np.load(args.psi)
-    s = np.load(args.s).reshape(-1, 1)
-
-    samples, indices = f(psi, s)
+@arg("n-samples", type=int)
+def main(
+    n_samples: int,
+    *,
+    psi: Path = Path("preferences/psi_set.npy"),
+    s: Path = Path("preferences/s_set.npy"),
+    out: Path = Path("preferences/filtered.npy"),
+    epsilon: float = 0.0,
+    delta: float = 0.95,
+):
+    filtered = filter_halfplanes(
+        psi=np.load(psi),
+        s=np.load(s),
+        n_samples=n_samples,
+        epsilon=epsilon,
+        delta=delta,
+    )
+    np.save(out, filtered)
 
 
 if __name__ == "__main__":
-    main()
+    argh.dispatch_command(main)
