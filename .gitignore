@@ -10,3 +10,5 @@ ctrl_samples/tosser.npz
 
 *.npy*
 *.npz*
+
+scratch.py
