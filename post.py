@@ -4,10 +4,13 @@
 
 # import argparse
 
+import logging
+
 import numpy as np
 
+from linear_programming import remove_redundant_constraints
 from sampling import Sampler
-from simulation_utils import create_env, get_feedback, run_algo
+from simulation_utils import create_env
 
 #%%
 
@@ -38,7 +41,7 @@ def inside(w: np.array, psi: np.array, s: int) -> bool:
     return np.sign(np.dot(w, psi)) == s
 
 
-def f(psi, s, n_samples, epsilon=0, delta=0.95):
+def f(psi, s, n_samples, epsilon=0, delta=0.95, logger=logging.getLogger()):
     simulation_object = create_env("driver")
     d = simulation_object.num_of_features
 
@@ -48,10 +51,12 @@ def f(psi, s, n_samples, epsilon=0, delta=0.95):
     samples = w_sampler.sample(n_samples)
 
     indices = np.dot(samples, psi.T) * s.reshape(-1) > -epsilon
+    logger.debug(f"indices.shape={indices.shape}")
 
     filtered = psi[np.mean(indices, axis=0) > delta]
+    logger.debug(f"epsilon-delta filtered.shape={filtered.shape}")
 
-    # TODO(joschnei) Calculate linear programming redundancies
+    filtered = remove_redundant_constraints(filtered)
 
     return filtered
 
