@@ -31,6 +31,9 @@ def batch(
 ):
     reward = np.array(true_reward)
     reward = reward / np.linalg.norm(reward)
+
+    np.save(outdir / "reward", reward)
+
     if N % b != 0:
         print("N must be divisible to b")
         exit(0)
