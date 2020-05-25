@@ -59,9 +59,11 @@ def remove_redundant_constraints(halfspaces, epsilon=0.0001) -> List[np.ndarray]
     # for each row in halfspaces, check if it is redundant
 
     non_redundant_halfspaces: List[np.ndarray] = list()
+    indices: List[int] = list()
+
     halfspaces_to_check = halfspaces
 
-    for _, halfspace in enumerate(halfspaces):
+    for i, halfspace in enumerate(halfspaces):
         logging.debug(f"Checking half space {halfspace}")
 
         halfspaces_lp = np.array(
@@ -85,14 +87,16 @@ def remove_redundant_constraints(halfspaces, epsilon=0.0001) -> List[np.ndarray]
                 # all remaining halfspaces are required
                 # TODO: Check, but I think this is true since we first normalize and remove redundancies
                 non_redundant_halfspaces.extend(halfspaces_to_check)
+                indices.extend(range(i, i + len(halfspaces_to_check)))
                 break
 
         if not is_redundant_constraint(halfspace, halfspaces_lp, epsilon):
             # keep h
             logging.info("Not redundant")
             non_redundant_halfspaces.append(halfspace)
+            indices.append(i)
         else:
             logging.info("Redundant")
 
         halfspaces_to_check = halfspaces_to_check[1:]
-    return non_redundant_halfspaces
+    return non_redundant_halfspaces, indices
