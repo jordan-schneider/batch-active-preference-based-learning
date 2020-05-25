@@ -40,34 +40,46 @@ def filter_halfplanes(
     indices = (
         np.mean(np.dot(samples, psi.T) * s.reshape(-1) > 0, axis=0) > noise_threshold
     )
-    psi = psi[indices]
-    s = s[indices]
-
     print(f"indices.shape={indices.shape}")
 
-    print(f"After noise filtering there are {psi.shape[0]} constraints left.")
+    print(f"After noise filtering there are {np.sum(indices)} constraints left.")
 
     # Filter halfspaces that don't have 1-d probability that the expected return gap is epsilon.
-    samples = sample(d, psi, s, n_samples)
-    indices = (
-        np.mean(np.dot(samples, psi.T) * s.reshape(-1) > epsilon, axis=0) > 1 - delta
-    )
-    psi = psi[indices]
-    s = s[indices]
+    filtered_psi = psi[indices]
+    filtered_s = s[indices]
+    samples = sample(d, filtered_psi, filtered_s, n_samples)
 
-    print(f"After epsilon delta filtering there are {psi.shape[0]} constraints left.")
+    tmp = (
+        np.mean(
+            np.dot(samples, filtered_psi.T) * filtered_s.reshape(-1) > epsilon, axis=0,
+        )
+        > 1 - delta
+    )
+
+    indices = np.where(indices)[0][tmp]
+
+    print(f"After epsilon delta filtering there are {len(indices)} constraints left.")
 
     # Remove redundant halfspaces
-    psi, indices = remove_redundant_constraints(psi)
-    psi = np.array(psi)
-    s = s[indices]
+    filtered_psi, constraint_indices = remove_redundant_constraints(psi[indices])
+
+    constraint_indices = np.array(constraint_indices, dtype=np.int)
+
+    indices = indices[constraint_indices]
+
+    filtered_psi = np.array(filtered_psi)
+
+    assert np.all(psi[indices] == filtered_psi)
+
+    filtered_s = s[indices]
 
     # These indices need to be applied to the inputs as well, or I need to calculate all of the
     # indices at once or something
 
-    print(f"After removing redundancies there are {psi.shape[0]} constraints left.")
+    print(f"After removing redundancies there are {len(indices)} constraints left.")
+    print(indices)
 
-    return psi, s, indices
+    return filtered_psi, filtered_s, indices
 
 
 #%%
@@ -98,8 +110,11 @@ def main(
     b_inputs = inputs[:, 1, :, :].reshape(
         inputs.shape[0] * inputs.shape[2], inputs.shape[3]
     )
-    inputs = np.array([a_inputs, b_inputs])[:, indices]
-    np.save(datadir / "filtered_inputs", indices)
+    inputs = np.array([a_inputs, b_inputs])
+    print(inputs.shape)
+    inputs = inputs[:, indices]
+    print(inputs.shape)
+    np.save(datadir / "filtered_inputs", inputs)
 
 
 if __name__ == "__main__":
