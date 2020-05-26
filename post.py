@@ -4,6 +4,7 @@
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 import argh
 import numpy as np
@@ -40,7 +41,7 @@ def filter_halfplanes(
     indices = (
         np.mean(np.dot(samples, psi.T) * s.reshape(-1) > 0, axis=0) > noise_threshold
     )
-    print(f"indices.shape={indices.shape}")
+    # print(f"indices.shape={indices.shape}")
 
     print(f"After noise filtering there are {np.sum(indices)} constraints left.")
 
@@ -57,27 +58,29 @@ def filter_halfplanes(
     )
 
     indices = np.where(indices)[0][tmp]
+    filtered_psi = psi[indices]
+    filtered_s = s[indices]
 
     print(f"After epsilon delta filtering there are {len(indices)} constraints left.")
 
-    # Remove redundant halfspaces
-    filtered_psi, constraint_indices = remove_redundant_constraints(psi[indices])
+    # # Remove redundant halfspaces
+    # filtered_psi, constraint_indices = remove_redundant_constraints(psi[indices])
 
-    constraint_indices = np.array(constraint_indices, dtype=np.int)
+    # constraint_indices = np.array(constraint_indices, dtype=np.int)
 
-    indices = indices[constraint_indices]
+    # indices = indices[constraint_indices]
 
-    filtered_psi = np.array(filtered_psi)
+    # filtered_psi = np.array(filtered_psi)
 
-    assert np.all(psi[indices] == filtered_psi)
+    # assert np.all(psi[indices] == filtered_psi)
 
-    filtered_s = s[indices]
+    # filtered_s = s[indices]
 
     # These indices need to be applied to the inputs as well, or I need to calculate all of the
     # indices at once or something
 
-    print(f"After removing redundancies there are {len(indices)} constraints left.")
-    print(indices)
+    # print(f"After removing redundancies there are {len(indices)} constraints left.")
+    # print(indices)
 
     return filtered_psi, filtered_s, indices
 
@@ -86,19 +89,23 @@ def filter_halfplanes(
 
 
 @arg("n-samples", type=int)
+@arg("--n-human-samples", type=int)
 def main(
     n_samples: int,
     *,
     datadir: Path = Path("preferences"),
     epsilon: float = 0.0,
     delta: float = 0.05,
+    n_human_samples: Optional[int] = None,
 ):
+    psi = np.load(datadir / "psi.npy")
+    s = np.load(datadir / "s.npy")
+    if n_human_samples is not None:
+        psi = psi[:n_human_samples]
+        s = s[:n_human_samples]
+
     psi, s, indices = filter_halfplanes(
-        psi=np.load(datadir / "psi.npy"),
-        s=np.load(datadir / "s.npy"),
-        n_samples=n_samples,
-        epsilon=epsilon,
-        delta=delta,
+        psi=psi, s=s, n_samples=n_samples, epsilon=epsilon, delta=delta,
     )
     np.save(datadir / "filtered_psi", psi)
     np.save(datadir / "filtered_s", s)
@@ -111,9 +118,9 @@ def main(
         inputs.shape[0] * inputs.shape[2], inputs.shape[3]
     )
     inputs = np.array([a_inputs, b_inputs])
-    print(inputs.shape)
+    if n_human_samples is not None:
+        inputs = inputs[:, :n_human_samples]
     inputs = inputs[:, indices]
-    print(inputs.shape)
     np.save(datadir / "filtered_inputs", inputs)
 
 
