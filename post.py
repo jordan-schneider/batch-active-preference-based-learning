@@ -25,13 +25,7 @@ def sample(d, psi, s, n_samples):
 
 
 def filter_halfplanes(
-    psi,
-    s,
-    n_samples,
-    noise_threshold=0.7,
-    epsilon=0,
-    delta=0.05,
-    logger=logging.getLogger(),
+    psi, s, n_samples, noise_threshold=0.7, epsilon=0, delta=0.05, skip_lp: bool = True,
 ):
     simulation_object = create_env("driver")
     d = simulation_object.num_of_features
@@ -41,7 +35,6 @@ def filter_halfplanes(
     indices = (
         np.mean(np.dot(samples, psi.T) * s.reshape(-1) > 0, axis=0) > noise_threshold
     )
-    # print(f"indices.shape={indices.shape}")
 
     print(f"After noise filtering there are {np.sum(indices)} constraints left.")
 
@@ -63,24 +56,21 @@ def filter_halfplanes(
 
     print(f"After epsilon delta filtering there are {len(indices)} constraints left.")
 
-    # # Remove redundant halfspaces
-    # filtered_psi, constraint_indices = remove_redundant_constraints(psi[indices])
+    if not skip_lp:
+        # Remove redundant halfspaces
+        filtered_psi, constraint_indices = remove_redundant_constraints(psi[indices])
 
-    # constraint_indices = np.array(constraint_indices, dtype=np.int)
+        constraint_indices = np.array(constraint_indices, dtype=np.int)
 
-    # indices = indices[constraint_indices]
+        indices = indices[constraint_indices]
 
-    # filtered_psi = np.array(filtered_psi)
+        filtered_psi = np.array(filtered_psi)
 
-    # assert np.all(psi[indices] == filtered_psi)
+        assert np.all(psi[indices] == filtered_psi)
 
-    # filtered_s = s[indices]
+        filtered_s = s[indices]
 
-    # These indices need to be applied to the inputs as well, or I need to calculate all of the
-    # indices at once or something
-
-    # print(f"After removing redundancies there are {len(indices)} constraints left.")
-    # print(indices)
+        print(f"After removing redundancies there are {len(indices)} constraints left.")
 
     return filtered_psi, filtered_s, indices
 

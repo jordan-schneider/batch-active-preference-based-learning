@@ -13,9 +13,7 @@ from scipy.stats import multivariate_normal
 from post import filter_halfplanes
 
 
-def run_test(
-    reward, psi, s, reward_noise: float = 1.0, n_rewards: int = 100,
-):
+def run_test(reward, psi, s, reward_noise: float = 1.0, n_rewards: int = 100,) -> float:
     dist = multivariate_normal(mean=reward, cov=np.eye(reward.shape[0]) * reward_noise)
 
     fake_rewards = dist.rvs(n_rewards)
