@@ -4,11 +4,12 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import argh
 import numpy as np
 from argh import arg
+from scipy.spatial import distance
 
 from linear_programming import remove_redundant_constraints
 from sampling import Sampler
@@ -17,16 +18,29 @@ from simulation_utils import create_env
 #%%
 
 
-def sample(d, psi, s, n_samples):
+def sample(d, psi, s, n_samples) -> np.ndarray:
     w_sampler = Sampler(d)
     w_sampler.A = psi
     w_sampler.y = s.reshape(-1, 1)
     return w_sampler.sample(n_samples)
 
 
+def remove_duplicates(
+    halfspace_normals: np.ndarray, precision=0.0001
+) -> List[np.ndarray]:
+    """ Remove halfspaces that have small cosine similarity to another. """
+    preprocessed_normals: List[np.ndarray] = []
+    for n in halfspace_normals:
+        for pn in preprocessed_normals:
+            if distance.cosine(n, pn) < precision:
+                break
+        preprocessed_normals.append(n)
+    return preprocessed_normals
+
+
 def filter_halfplanes(
     psi, s, n_samples, noise_threshold=0.7, epsilon=0, delta=0.05, skip_lp: bool = True,
-):
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     simulation_object = create_env("driver")
     d = simulation_object.num_of_features
 
@@ -58,7 +72,9 @@ def filter_halfplanes(
 
     if not skip_lp:
         # Remove redundant halfspaces
-        filtered_psi, constraint_indices = remove_redundant_constraints(psi[indices])
+        filtered_psi, constraint_indices = remove_redundant_constraints(
+            remove_duplicates(psi[indices])
+        )
 
         constraint_indices = np.array(constraint_indices, dtype=np.int)
 
@@ -87,7 +103,7 @@ def main(
     epsilon: float = 0.0,
     delta: float = 0.05,
     n_human_samples: Optional[int] = None,
-):
+) -> None:
     psi = np.load(datadir / "psi.npy")
     s = np.load(datadir / "s.npy")
     if n_human_samples is not None:
