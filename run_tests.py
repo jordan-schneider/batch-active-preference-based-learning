@@ -4,25 +4,40 @@ are caught by the preferences."""
 from pathlib import Path
 from typing import List
 
-import argh
-import matplotlib.pyplot as plt
+import argh  # type: ignore
+import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 from argh import arg
-from scipy.stats import multivariate_normal
+from scipy.stats import multivariate_normal  # type: ignore
 
 from post import filter_halfplanes
 
 
-def run_test(reward, psi, s, reward_noise: float = 1.0, n_rewards: int = 100,) -> float:
+def normalize(vectors: np.ndarray) -> np.ndarray:
+    """ Takes in a 2d array of row vectors and ensures each row vector has an L_2 norm of 1."""
+    return (vectors.T / np.linalg.norm(vectors, axis=1)).T
+
+
+def run_test(
+    reward: np.ndarray,
+    normals: np.ndarray,
+    preferences: np.ndarray,
+    epsilon: float = 0.0,
+    reward_noise: float = 1.0,
+    n_rewards: int = 100,
+) -> float:
+    """Runs an alignment test on randomly generated fake reward weights. """
     dist = multivariate_normal(mean=reward, cov=np.eye(reward.shape[0]) * reward_noise)
 
     fake_rewards = dist.rvs(n_rewards)
-    fake_rewards = (fake_rewards.T / np.linalg.norm(fake_rewards, axis=1)).T
+    fake_rewards = normalize(fake_rewards)
 
     for fake_reward in fake_rewards:
         assert np.abs(np.linalg.norm(fake_reward) - 1) < 0.0001
 
-    frac_pass = np.mean(np.all(np.dot(fake_rewards, psi.T) * s > 0, axis=1))
+    frac_pass = np.mean(
+        np.all(np.dot(fake_rewards, normals.T) * preferences > epsilon, axis=1)
+    )
 
     return frac_pass
 
@@ -31,25 +46,31 @@ def run_test(reward, psi, s, reward_noise: float = 1.0, n_rewards: int = 100,) -
 @arg("--samples", nargs="+", type=int)
 def run_tests(
     *,
+    epsilon: float = 0.0,
     noises: List[float] = [1.0],
     samples: List[int] = [1],
     n_rewards: int = 100,
     datadir: Path = Path("preferences"),
 ):
+    """ Runs multiple tests with different of fake reward noises and sample sizes."""
     true_reward = np.load(datadir / "reward.npy")
-    psi = np.load(datadir / "psi.npy")
-    s = np.load(datadir / "s.npy")
+    normals = np.load(datadir / "psi.npy")
+    preferences = np.load(datadir / "s.npy")
     for sample in samples:
-        filtered_psi, filtered_s, _ = filter_halfplanes(
-            psi=psi[:sample], s=s[:sample], n_samples=1000
+        filtered_normals, filtered_preferences, _ = filter_halfplanes(
+            normals=normals[:sample],
+            preferences=preferences[:sample],
+            n_samples=1000,
+            epsilon=epsilon,
         )
 
         frac_passes = np.array(
             [
                 run_test(
-                    psi=filtered_psi,
-                    s=filtered_s,
+                    normals=filtered_normals,
+                    preferences=filtered_preferences,
                     reward=true_reward,
+                    epsilon=epsilon,
                     reward_noise=noise,
                     n_rewards=n_rewards,
                 )
