@@ -1,9 +1,10 @@
 from pathlib import Path
 
 import numpy as np
+from scipy.stats import multivariate_normal
 
-from post import filter_halfplanes
-from run_tests import run_test
+from post import filter_halfplanes, sample
+from run_tests import normalize, run_test
 
 
 def main():
@@ -11,25 +12,38 @@ def main():
     normals = np.load(Path("preferences/psi.npy"))
     preferences = np.load(Path("preferences/s.npy"))
 
-    print("Doing filtering with LP")
-    filtered_normals, filtered_preferences, _ = filter_halfplanes(
-        normals, preferences, 100, skip_lp=False
+    normals = (normals.T * preferences).T
+
+    rewards = sample(
+        reward_dimension=4, normals=(normals.T * preferences).T, n_samples=100,
     )
-    print(f"There are {len(filtered_preferences)} halfplanes after filtering.")
-    frac_pass = run_test(reward, filtered_normals, filtered_preferences)
+
+    reward_noise = 0.01
+    n_rewards = 100
+    dist = multivariate_normal(mean=reward, cov=np.eye(reward.shape[0]) * reward_noise)
+
+    fake_rewards = dist.rvs(n_rewards)
+    fake_rewards = normalize(fake_rewards)
+
+    print("Doing filtering with LP")
+    filtered_normals, _ = filter_halfplanes(
+        normals, preferences, skip_lp=False, rewards=rewards, deterministic=True
+    )
+    print(f"There are {len(filtered_normals)} halfplanes after filtering.")
+    frac_pass = run_test(reward, filtered_normals, fake_rewards=fake_rewards)
     print(
-        f"With {len(filtered_preferences)} questions, "
+        f"With {len(filtered_normals)} questions, "
         f"{frac_pass * 100}% of the fake rewards passed the test."
     )
 
     print("Doing filtering without LP")
-    filtered_normals, filtered_preferences, _ = filter_halfplanes(
-        normals, preferences, 100, skip_lp=True
+    filtered_normals, _ = filter_halfplanes(
+        normals, preferences, skip_lp=True, rewards=rewards, deterministic=True,
     )
-    print(f"There are {len(filtered_preferences)} halfplanes after filtering.")
-    frac_pass = run_test(reward, filtered_normals, filtered_preferences)
+    print(f"There are {len(filtered_normals)} halfplanes after filtering.")
+    frac_pass = run_test(reward, filtered_normals, fake_rewards=fake_rewards)
     print(
-        f"With {len(filtered_preferences)} questions, "
+        f"With {len(filtered_normals)} questions, "
         f"{frac_pass * 100}% of the fake rewards passed the test."
     )
 

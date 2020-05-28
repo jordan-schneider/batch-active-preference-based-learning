@@ -17,98 +17,97 @@ from simulation_utils import create_env
 #%%
 
 
-def sample(
-    reward_dimension: int, normals: np.ndarray, preferences: np.ndarray, n_samples: int,
-) -> np.ndarray:
+def sample(reward_dimension: int, normals: np.ndarray, n_samples: int,) -> np.ndarray:
     """ Samples n_samples rewards via MCMC. """
     w_sampler = Sampler(reward_dimension)
     w_sampler.A = normals
-    w_sampler.y = preferences.reshape(-1, 1)
+    w_sampler.y = np.ones((normals.shape[0], 1))
     return w_sampler.sample(n_samples)
 
 
-def remove_duplicates(normals: np.ndarray, precision=0.0001) -> List[np.ndarray]:
+def remove_duplicates(
+    normals: np.ndarray, precision=0.0001
+) -> Tuple[np.ndarray, np.ndarray]:
     """ Remove halfspaces that have small cosine similarity to another. """
-    out: List[np.ndarray] = []
-    for normal in normals:
+    out: List[np.ndarray] = list()
+    indices: List[int] = list()
+    for i, normal in enumerate(normals):
         for accepted_normal in out:
             if distance.cosine(normal, accepted_normal) < precision:
                 break
         out.append(normal)
-    return out
+        indices.append(i)
+    return np.array(out), np.array(indices)
 
 
 def filter_halfplanes(
     normals: np.ndarray,
-    preferences: np.ndarray,
-    n_samples: int,
     noise_threshold: float = 0.7,
     epsilon: float = 0.0,
     delta: float = 0.05,
     skip_lp: bool = True,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """ Filters test questions by removing noise answers, requiring answers have a gap of at 
+    n_samples: Optional[int] = None,
+    rewards: Optional[np.ndarray] = None,
+    deterministic: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """ Filters test questions by removing noise answers, requiring answers have a gap of at
     least epsilon, and removing redundant questions via linear programming. """
-    reward_dimension = create_env("driver").num_of_features
+    filtered_normals, indices = remove_duplicates(normals)
+
+    assert np.all(normals[indices] == filtered_normals)
+
+    if rewards is None:
+        if deterministic:
+            raise ValueError("Must provide rewards to use deterministic mode.")
+        if n_samples is None:
+            raise ValueError("Must provide n_samples if reward is not provided")
+
+        reward_dimension = create_env("driver").num_of_features
+        rewards = sample(
+            reward_dimension=reward_dimension, normals=normals, n_samples=n_samples,
+        )
 
     # Filter halfspaces that are too noisy
-    rewards = sample(
-        reward_dimension=reward_dimension,
-        normals=normals,
-        preferences=preferences,
-        n_samples=n_samples,
+    filtered_indices = (
+        np.mean(np.dot(rewards, filtered_normals.T) > 0, axis=0) > noise_threshold
     )
-    indices = (
-        np.mean(np.dot(rewards, normals.T) * preferences.reshape(-1) > 0, axis=0)
-        > noise_threshold
-    )
+    indices = indices[filtered_indices]
+    assert all([row in filtered_normals for row in normals[indices]])
+    filtered_normals = normals[indices]
 
-    print(f"After noise filtering there are {np.sum(indices)} constraints left.")
+    print(f"After noise filtering there are {len(indices)} constraints left.")
+
+    if not deterministic and n_samples is not None:
+        rewards = sample(
+            reward_dimension=reward_dimension,
+            normals=filtered_normals,
+            n_samples=n_samples,
+        )
 
     # Filter halfspaces that don't have 1-d probability that the expected return gap is epsilon.
-    filtered_normals = normals[indices]
-    filtered_preferences = preferences[indices]
-    rewards = sample(
-        reward_dimension=reward_dimension,
-        normals=normals,
-        preferences=preferences,
-        n_samples=n_samples,
-    )
-
     filtered_indices = (
-        np.mean(
-            np.dot(rewards, filtered_normals.T) * filtered_preferences.reshape(-1)
-            > epsilon,
-            axis=0,
-        )
-        > 1 - delta
+        np.mean(np.dot(rewards, filtered_normals.T) > epsilon, axis=0,) > 1 - delta
     )
-
-    indices = np.where(indices)[0][filtered_indices]
+    indices = indices[filtered_indices]
+    assert all([row in filtered_normals for row in normals[indices]])
     filtered_normals = normals[indices]
-    filtered_preferences = preferences[indices]
 
     print(f"After epsilon delta filtering there are {len(indices)} constraints left.")
 
     if not skip_lp:
         # Remove redundant halfspaces
         filtered_normals, constraint_indices = remove_redundant_constraints(
-            remove_duplicates(normals[indices])
+            filtered_normals
         )
-
-        constraint_indices = np.array(constraint_indices, dtype=np.int)
-
-        indices = indices[constraint_indices]
-
         filtered_normals = np.array(filtered_normals)
 
+        constraint_indices = np.array(constraint_indices, dtype=np.int)
+        indices = indices[constraint_indices]
         assert np.all(normals[indices] == filtered_normals)
-
-        filtered_preferences = preferences[indices]
 
         print(f"After removing redundancies there are {len(indices)} constraints left.")
 
-    return filtered_normals, filtered_preferences, indices
+    return filtered_normals, indices
 
 
 #%%
@@ -126,19 +125,16 @@ def main(
 ) -> None:
     normals = np.load(datadir / "psi.npy")
     preferences = np.load(datadir / "s.npy")
+
+    normals = (normals.T * preferences).T
+
     if n_human_samples is not None:
         normals = normals[:n_human_samples]
-        preferences = preferences[:n_human_samples]
 
-    normals, preferences, indices = filter_halfplanes(
-        normals=normals,
-        preferences=preferences,
-        n_samples=n_samples,
-        epsilon=epsilon,
-        delta=delta,
+    normals, indices = filter_halfplanes(
+        normals=normals, n_samples=n_samples, epsilon=epsilon, delta=delta,
     )
-    np.save(datadir / "filtered_psi", normals)
-    np.save(datadir / "filtered_s", preferences)
+    np.save(datadir / "filtered_normals", normals)
 
     inputs = np.load(datadir / "inputs.npy")
     a_inputs = inputs[:, 0, :, :].reshape(

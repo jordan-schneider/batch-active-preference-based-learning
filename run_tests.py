@@ -2,7 +2,7 @@
 are caught by the preferences."""
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import argh  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
@@ -21,25 +21,38 @@ def normalize(vectors: np.ndarray) -> np.ndarray:
 def run_test(
     reward: np.ndarray,
     normals: np.ndarray,
-    preferences: np.ndarray,
     epsilon: float = 0.0,
-    reward_noise: float = 1.0,
-    n_rewards: int = 100,
+    reward_noise: Optional[float] = None,
+    n_rewards: Optional[int] = None,
+    fake_rewards: Optional[np.ndarray] = None,
 ) -> float:
     """Runs an alignment test on randomly generated fake reward weights. """
-    dist = multivariate_normal(mean=reward, cov=np.eye(reward.shape[0]) * reward_noise)
 
-    fake_rewards = dist.rvs(n_rewards)
-    fake_rewards = normalize(fake_rewards)
+    if reward_noise is not None and n_rewards is not None:
+        dist = multivariate_normal(
+            mean=reward, cov=np.eye(reward.shape[0]) * reward_noise
+        )
+
+        fake_rewards = normalize(dist.rvs(n_rewards))
+    elif fake_rewards is None:
+        raise ValueError(
+            "Must specify either fake_rewards or reward_noise and n_rewards."
+        )
 
     for fake_reward in fake_rewards:
         assert np.abs(np.linalg.norm(fake_reward) - 1) < 0.0001
 
-    frac_pass = np.mean(
-        np.all(np.dot(fake_rewards, normals.T) * preferences > epsilon, axis=1)
-    )
+    frac_pass = np.mean(np.all(np.dot(fake_rewards, normals.T) > epsilon, axis=1))
 
     return frac_pass
+
+
+def run_epsilon_experiments():
+    """ Run tests with full data to determine how much reward noise gets"""
+    pass
+
+
+# TODO
 
 
 @arg("--noises", nargs="+", type=float)
@@ -56,19 +69,18 @@ def run_tests(
     true_reward = np.load(datadir / "reward.npy")
     normals = np.load(datadir / "psi.npy")
     preferences = np.load(datadir / "s.npy")
+
+    normals = (normals.T * preferences).T
+
     for sample in samples:
-        filtered_normals, filtered_preferences, _ = filter_halfplanes(
-            normals=normals[:sample],
-            preferences=preferences[:sample],
-            n_samples=1000,
-            epsilon=epsilon,
+        filtered_normals, _ = filter_halfplanes(
+            normals=normals[:sample], n_samples=1000, epsilon=epsilon,
         )
 
         frac_passes = np.array(
             [
                 run_test(
                     normals=filtered_normals,
-                    preferences=filtered_preferences,
                     reward=true_reward,
                     epsilon=epsilon,
                     reward_noise=noise,
@@ -81,7 +93,7 @@ def run_tests(
         assert np.all((frac_passes <= 1.0) & (frac_passes >= 0.0))
         # print(frac_passes)
 
-        plt.plot(noises, frac_passes, label=sample)
+        plt.plot(np.log(noises), frac_passes, label=sample)
     plt.title(f"Pass rate of {n_rewards} reward functions vs variance")
     plt.xlabel("Variance of Guassian Generating Rewards")
     plt.ylabel("Pass rate of Rewards")
