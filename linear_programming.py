@@ -1,7 +1,7 @@
 # from cvxopt import matrix, solvers
 import logging
 import sys
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 from scipy.optimize import linprog
@@ -9,7 +9,9 @@ from scipy.optimize import linprog
 
 # TODO: at some point should probably use something better than scipy, do we have a license for
 # ibm's cplex solver?
-def is_redundant_constraint(halfspace, halfspaces, epsilon=0.0001):
+def is_redundant_constraint(
+    halfspace: np.ndarray, halfspaces: np.ndarray, epsilon=0.0001
+) -> bool:
     # Let h be a halfspace constraint in the set of contraints H.
     # We have a constraint c^w >= 0 we want to see if we can minimize c^T w and get it to go below 0
     # if not then this constraint is satisfied by the constraints in H, if we can, then we need to
@@ -43,7 +45,9 @@ def is_redundant_constraint(halfspace, halfspaces, epsilon=0.0001):
         return True
 
 
-def remove_redundant_constraints(halfspaces, epsilon=0.0001) -> List[np.ndarray]:
+def remove_redundant_constraints(
+    halfspaces, epsilon=0.0001
+) -> Tuple[np.ndarray, np.ndarray]:
     """Return a new array with all redundant halfspaces removed.
 
     Parameters
@@ -99,4 +103,4 @@ def remove_redundant_constraints(halfspaces, epsilon=0.0001) -> List[np.ndarray]
             logging.info("Redundant")
 
         halfspaces_to_check = halfspaces_to_check[1:]
-    return non_redundant_halfspaces, indices
+    return np.array(non_redundant_halfspaces), np.array(indices)
