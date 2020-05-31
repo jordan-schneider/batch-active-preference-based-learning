@@ -8,9 +8,9 @@ from run_tests import normalize, run_test
 
 
 def main():
-    reward = np.load(Path("preferences/reward.npy"))
-    normals = np.load(Path("preferences/psi.npy"))
-    preferences = np.load(Path("preferences/s.npy"))
+    reward = np.load(Path("questions/reward.npy"))
+    normals = np.load(Path("questions/normals.npy"))
+    preferences = np.load(Path("questions/preferences.npy"))
 
     normals = (normals.T * preferences).T
 
@@ -27,7 +27,11 @@ def main():
 
     print("Doing filtering with LP")
     filtered_normals, _ = filter_halfplanes(
-        normals, preferences, skip_lp=False, rewards=rewards, deterministic=True
+        normals,
+        preferences,
+        skip_redundancy_filtering=False,
+        rewards=rewards,
+        deterministic=True,
     )
     print(f"There are {len(filtered_normals)} halfplanes after filtering.")
     frac_pass = run_test(reward, filtered_normals, fake_rewards=fake_rewards)
@@ -38,7 +42,11 @@ def main():
 
     print("Doing filtering without LP")
     filtered_normals, _ = filter_halfplanes(
-        normals, preferences, skip_lp=True, rewards=rewards, deterministic=True,
+        normals,
+        preferences,
+        skip_redundancy_filtering=True,
+        rewards=rewards,
+        deterministic=True,
     )
     print(f"There are {len(filtered_normals)} halfplanes after filtering.")
     frac_pass = run_test(reward, filtered_normals, fake_rewards=fake_rewards)

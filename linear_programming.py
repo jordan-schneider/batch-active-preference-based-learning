@@ -4,7 +4,7 @@ import sys
 from typing import List, Tuple
 
 import numpy as np
-from scipy.optimize import linprog
+from scipy.optimize import linprog  # type: ignore
 
 
 # TODO: at some point should probably use something better than scipy, do we have a license for
@@ -94,7 +94,9 @@ def remove_redundant_constraints(
                 indices.extend(range(i, i + len(halfspaces_to_check)))
                 break
 
-        if not is_redundant_constraint(halfspace, halfspaces_lp, epsilon):
+        if halfspaces_lp.shape[0] == 0 or not is_redundant_constraint(
+            halfspace, halfspaces_lp, epsilon
+        ):
             # keep h
             logging.info("Not redundant")
             non_redundant_halfspaces.append(halfspace)

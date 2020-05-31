@@ -2,57 +2,169 @@
 are caught by the preferences."""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import argh  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 from argh import arg
+from numpy.linalg import norm
 from scipy.stats import multivariate_normal  # type: ignore
+from sklearn.metrics import confusion_matrix
 
 from post import filter_halfplanes
+
+N_FEATURES = 4
+
+
+def assert_normals(normals: np.ndarray) -> None:
+    shape = normals.shape
+    assert len(shape) == 2
+    assert shape[1] == N_FEATURES
 
 
 def normalize(vectors: np.ndarray) -> np.ndarray:
     """ Takes in a 2d array of row vectors and ensures each row vector has an L_2 norm of 1."""
-    return (vectors.T / np.linalg.norm(vectors, axis=1)).T
+    return (vectors.T / norm(vectors, axis=1)).T
+
+
+def find_reward_boundary(
+    normals: np.ndarray, n_rewards: int, epsilon: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """ Generates n_rewards reward weight with L2 norm of one. """
+    assert_normals(normals)
+    assert n_rewards > 0
+    assert epsilon >= 0
+
+    dist = multivariate_normal(mean=np.zeros(N_FEATURES))
+
+    rewards = normalize(dist.rvs(size=n_rewards))
+
+    ground_truth_alignment = np.all(np.dot(rewards, normals.T) > epsilon, axis=1)
+
+    reward_shape = rewards.shape
+    assert reward_shape == ground_truth_alignment.shape
+    assert reward_shape == (n_rewards, N_FEATURES)
+
+    return rewards, ground_truth_alignment
 
 
 def run_test(
-    reward: np.ndarray,
     normals: np.ndarray,
     epsilon: float = 0.0,
-    reward_noise: Optional[float] = None,
     n_rewards: Optional[int] = None,
     fake_rewards: Optional[np.ndarray] = None,
-) -> float:
+    aligned: Optional[np.ndarray] = None,
+) -> np.ndarray:
     """Runs an alignment test on randomly generated fake reward weights. """
+    assert_normals(normals)
+    assert epsilon >= 0
 
-    if reward_noise is not None and n_rewards is not None:
-        dist = multivariate_normal(
-            mean=reward, cov=np.eye(reward.shape[0]) * reward_noise
+    if n_rewards is not None:
+        fake_rewards, aligned = find_reward_boundary(
+            normals=normals, n_rewards=n_rewards, epsilon=epsilon
         )
-
-        fake_rewards = normalize(dist.rvs(n_rewards))
-    elif fake_rewards is None:
-        raise ValueError(
-            "Must specify either fake_rewards or reward_noise and n_rewards."
-        )
+    elif fake_rewards is not None and aligned is not None:
+        assert len(fake_rewards.shape) == 2
+        assert fake_rewards.shape == aligned.shape
+    else:
+        raise ValueError("Must specify either fake_rewards and aligned or n_rewards.")
 
     for fake_reward in fake_rewards:
-        assert np.abs(np.linalg.norm(fake_reward) - 1) < 0.0001
+        assert np.abs(norm(fake_reward) - 1) < 0.0001
 
-    frac_pass = np.mean(np.all(np.dot(fake_rewards, normals.T) > epsilon, axis=1))
+    if normals.shape[0] > 0:
+        results = np.all(np.dot(fake_rewards, normals.T) > epsilon, axis=1)
+        return confusion_matrix(y_true=aligned, y_pred=results)
+    else:
+        return confusion_matrix(y_true=aligned, y_pred=np.ones(aligned.shape))
 
-    return frac_pass
 
-
-def run_epsilon_experiments():
+@arg("--epsilons", nargs="+", type=float)
+@arg("--noises", nargs="+", type=float)
+@arg("--samples", nargs="+", type=int)
+def run_epsilon_experiments(
+    epsilons: List[float] = [0.0],
+    n_rewards: int = 100,
+    noises: List[float] = [1.0],
+    samples: List[int] = [1],
+    frac_pass_cutoff: float = 0.9,
+    normals_name: Path = Path("normals.npy"),
+    preferences_name: Path = Path("preferences.npy"),
+    datadir: Path = Path("questions"),
+    skip_remove_duplicates: bool = False,
+    skip_noise_filtering: bool = False,
+    skip_epsilon_filtering: bool = False,
+    skip_redundancy_filtering: bool = False,
+):
     """ Run tests with full data to determine how much reward noise gets"""
-    pass
 
+    true_reward = np.load(datadir / "reward.npy")
+    normals = np.load(datadir / normals_name)
+    preferences = np.load(datadir / preferences_name)
 
-# TODO
+    normals = (normals.T * preferences).T
+
+    for i, epsilon in enumerate(epsilons):
+        cutoff_noise = noises[-1]
+        for j, noise in enumerate(noises):
+            filtered_normals, _ = filter_halfplanes(
+                normals=normals,
+                n_samples=1000,
+                epsilon=epsilon,
+                skip_redundancy_filtering=skip_redundancy_filtering,
+            )
+
+            confusion = run_test(
+                normals=filtered_normals,
+                reward=true_reward,
+                epsilon=epsilon,
+                reward_noise=noise,
+                n_rewards=n_rewards,
+            )
+            if frac_pass < frac_pass_cutoff and j > 0:
+                cutoff_noise = noises[j - 1]
+                print(
+                    f"cutoff_noise={cutoff_noise}, frac_pass={frac_pass}, j={j}, epsilon={epsilon}"
+                )
+                break
+
+        for n in samples:
+            filtered_normals = normals[:n]
+            filtered_normals, _ = filter_halfplanes(
+                normals=filtered_normals,
+                n_samples=1000,
+                epsilon=epsilon,
+                skip_remove_duplicates=skip_remove_duplicates,
+                skip_noise_filtering=skip_noise_filtering,
+                skip_epsilon_filtering=skip_epsilon_filtering,
+                skip_redundancy_filtering=skip_redundancy_filtering,
+            )
+
+            if filtered_normals.shape[0] > 0:
+                frac_passes = np.array(
+                    [
+                        run_test(
+                            normals=filtered_normals,
+                            reward=true_reward,
+                            epsilon=epsilon,
+                            reward_noise=noise,
+                            n_rewards=n_rewards,
+                        )
+                        for noise in noises
+                    ]
+                )
+
+                assert np.all((frac_passes <= 1.0) & (frac_passes >= 0.0))
+                plt.plot(noises, frac_passes, label=n)
+        plt.vlines(x=cutoff_noise, ymin=0, ymax=1)
+        plt.title(f"Test results for epsilon={epsilon}")
+        plt.xlabel("Variance of Gaussian Generating Rewards")
+        plt.ylabel("Pass rate")
+        plt.ylim((0, 1.1))
+        plt.legend()
+        plt.savefig(Path("plots") / str(i))
+        plt.close()
 
 
 @arg("--noises", nargs="+", type=float)
@@ -63,19 +175,37 @@ def run_tests(
     noises: List[float] = [1.0],
     samples: List[int] = [1],
     n_rewards: int = 100,
-    datadir: Path = Path("preferences"),
+    datadir: Path = Path("questions"),
+    normals_name: Path = Path("normals.npy"),
+    preferences_name: Path = Path("preferences.npy"),
+    out_name: Path = Path("results.png"),
+    skip_filtering: bool = False,
+    skip_remove_duplicates: bool = False,
+    skip_noise_filtering: bool = False,
+    skip_epsilon_filtering: bool = False,
+    skip_redundancy_filtering: bool = False,
 ):
     """ Runs multiple tests with different of fake reward noises and sample sizes."""
     true_reward = np.load(datadir / "reward.npy")
-    normals = np.load(datadir / "psi.npy")
-    preferences = np.load(datadir / "s.npy")
+    normals = np.load(datadir / normals_name)
+    preferences = np.load(datadir / preferences_name)
 
     normals = (normals.T * preferences).T
 
     for sample in samples:
-        filtered_normals, _ = filter_halfplanes(
-            normals=normals[:sample], n_samples=1000, epsilon=epsilon,
-        )
+
+        filtered_normals = normals[:sample]
+
+        if not skip_filtering:
+            filtered_normals, _ = filter_halfplanes(
+                normals=filtered_normals,
+                n_samples=1000,
+                epsilon=epsilon,
+                skip_remove_duplicates=skip_remove_duplicates,
+                skip_noise_filtering=skip_noise_filtering,
+                skip_epsilon_filtering=skip_epsilon_filtering,
+                skip_redundancy_filtering=skip_redundancy_filtering,
+            )
 
         frac_passes = np.array(
             [
@@ -93,14 +223,14 @@ def run_tests(
         assert np.all((frac_passes <= 1.0) & (frac_passes >= 0.0))
         # print(frac_passes)
 
-        plt.plot(np.log(noises), frac_passes, label=sample)
+        plt.plot(noises, frac_passes, label=sample)
     plt.title(f"Pass rate of {n_rewards} reward functions vs variance")
-    plt.xlabel("Variance of Guassian Generating Rewards")
+    plt.xlabel("Variance of Gaussian Generating Rewards")
     plt.ylabel("Pass rate of Rewards")
-    plt.ylim((0, 1))
+    plt.ylim((0, 1.1))
     plt.legend()
-    plt.savefig("results.png")
+    plt.savefig(out_name)
 
 
 if __name__ == "__main__":
-    argh.dispatch_commands([run_test, run_tests])
+    argh.dispatch_commands([run_test, run_tests, run_epsilon_experiments])
