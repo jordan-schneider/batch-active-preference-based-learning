@@ -12,3 +12,7 @@ ctrl_samples/tosser.npz
 *.npz*
 
 scratch.py
+
+*.pkl
+
+*.png
