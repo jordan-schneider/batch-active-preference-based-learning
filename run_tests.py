@@ -126,7 +126,18 @@ def run_tests(
                 normals=filtered_normals, fake_rewards=rewards, aligned=aligned,
             )
 
-    pickle.dump(results, open(datadir / "out.pkl", "wb"))
+    outname = "out"
+    if skip_remove_duplicates:
+        outname += ".skip_duplicates"
+    if skip_noise_filtering:
+        outname += ".skip_noise"
+    if skip_epsilon_filtering:
+        outname += ".skip_epsilon"
+    if skip_redundancy_filtering:
+        outname += ".skip_lp"
+    outname += ".pkl"
+
+    pickle.dump(results, open(datadir / outname, "wb"))
 
 
 if __name__ == "__main__":
