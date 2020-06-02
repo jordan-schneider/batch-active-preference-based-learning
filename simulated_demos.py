@@ -10,13 +10,27 @@ from sampling import Sampler
 from simulation_utils import create_env, run_algo
 
 
-def get_simulated_feedback(simulation_object, input_A, input_B, reward):
+def get_simulated_feedback(
+    simulation_object,
+    input_A: np.ndarray,
+    input_B: np.ndarray,
+    reward: np.ndarray,
+    fake_noise: bool,
+) -> Tuple[np.ndarray, int]:
     simulation_object.feed(input_A)
     phi_A = simulation_object.get_features()
     simulation_object.feed(input_B)
     phi_B = simulation_object.get_features()
     normal = np.array(phi_A) - np.array(phi_B)
-    preference = np.sign(np.dot(reward, normal))
+    preference = int(np.sign(np.dot(reward, normal)))
+
+    if fake_noise:
+        noise_prob = min(1, np.exp(preference * np.dot(reward, normal)))
+        if random() > noise_prob:
+            preference *= -1
+
+    assert (len(normal.shape) == 1) and (normal.shape[0] == 4)
+    assert (preference == -1) or (preference == 1)
     return normal, preference
 
 
@@ -27,7 +41,8 @@ def batch(
     M: int = 1000,
     b: int = 10,
     true_reward: Tuple[float, float, float, float] = random((4,)) * 2 - 1,
-    outdir: Path = Path("questions")
+    outdir: Path = Path("questions"),
+    fake_noise: bool = False,
 ):
     reward = np.array(true_reward)
     reward = reward / np.linalg.norm(reward)
