@@ -122,12 +122,11 @@ def run_tests(
                 skip_redundancy_filtering=skip_redundancy_filtering,
             )
 
-            if filtered_normals.shape[0] > 0:
-                results[(epsilon, n)] = run_test(
-                    normals=filtered_normals, fake_rewards=rewards, aligned=aligned,
-                )
+            results[(epsilon, n)] = run_test(
+                normals=filtered_normals, fake_rewards=rewards, aligned=aligned,
+            )
 
-    pickle.dump(results, open("out.pkl", "wb"))
+    pickle.dump(results, open(datadir / "out.pkl", "wb"))
 
 
 if __name__ == "__main__":
