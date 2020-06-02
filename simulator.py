@@ -8,7 +8,6 @@ import numpy as np
 from world import World
 import car
 import dynamics
-import visualize
 import lane
 
 
