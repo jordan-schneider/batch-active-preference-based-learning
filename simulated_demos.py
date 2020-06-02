@@ -15,7 +15,7 @@ def get_simulated_feedback(
     input_A: np.ndarray,
     input_B: np.ndarray,
     reward: np.ndarray,
-    fake_noise: bool,
+    fake_noise: bool = False,
 ) -> Tuple[np.ndarray, int]:
     simulation_object.feed(input_A)
     phi_A = simulation_object.get_features()
@@ -77,7 +77,7 @@ def batch(
     inputs.append((a_inputs, b_inputs))
     for input_a, input_b in zip(a_inputs, b_inputs):
         normal, preference = get_simulated_feedback(
-            simulation_object, input_a, input_b, reward
+            simulation_object, input_a, input_b, reward, fake_noise=fake_noise
         )
         normals.append(normal)
         preferences.append(preference)
@@ -92,7 +92,7 @@ def batch(
         inputs.append((a_inputs, b_inputs))
         for input_a, input_b in zip(a_inputs, b_inputs):
             normal, preference = get_simulated_feedback(
-                simulation_object, input_a, input_b, reward
+                simulation_object, input_a, input_b, reward, fake_noise=fake_noise
             )
             normals.append(normal)
             preferences.append(preference)
