@@ -2,12 +2,10 @@
 are caught by the preferences."""
 
 import pickle
-from itertools import product
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import argh  # type: ignore
-import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 from argh import arg
 from numpy.linalg import norm
