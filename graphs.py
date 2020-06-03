@@ -1,5 +1,6 @@
 #%%
 import pickle
+import sys
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -12,6 +13,16 @@ from matplotlib import pyplot as plt  # type: ignore
 plt.rc("text", usetex=True)
 plt.rcParams.update({"font.size": 22})
 
+interactive = getattr(sys, "ps1", None) is not None
+
+
+def closefig():
+    if interactive:
+        plt.show()
+    else:
+        plt.close()
+
+
 result = pickle.load(open(Path("questions") / str(1) / ("out.skip_noise.pkl"), "rb"))
 ns = set()
 for _, n in result.keys():
@@ -20,6 +31,9 @@ for _, n in result.keys():
 palette = sns.color_palette("muted", len(ns))
 
 palette_map = {str(n): palette[i] for i, n in enumerate(sorted(ns))}
+
+
+n_replications = 5
 
 
 def nest_by_second(
@@ -35,7 +49,7 @@ def nest_by_second(
 
 def get_df(rootdir: Path, ablation: str):
     df = pd.DataFrame(columns=["epsilon", "n", "tn", "fp", "tp"])
-    for replication in range(1, 6):
+    for replication in range(1, n_replications + 1):
         out_dict = nest_by_second(
             pickle.load(
                 open(rootdir / str(replication) / ("out" + ablation + ".pkl"), "rb")
@@ -65,6 +79,7 @@ def get_df(rootdir: Path, ablation: str):
     # Seaborn tries to convert integer hues into rgb values. So we make them strings.
     df["n"] = df["n"].astype(str)
     df["fpr"] = df.fp / (df.fp + df.tn)
+    df["tpf"] = df.tp / (df.tp + df.fp + df.tn)
 
     return df
 
@@ -91,41 +106,111 @@ def plot_fpr(df: pd.DataFrame, rootdir: Path, ablation: str):
         ticks=np.linspace(0, 1, 11),
         labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0],
     )
+    plt.ylim((0, 1.01))
     plt.savefig(rootdir / ("fpr" + ablation + ".png"))
-    plt.show()
+    closefig()
+
+
+def plot_individual_fpr(df: pd.DataFrame, rootdir: Path, ablation: str):
+    for i in range(1, n_replications + 1):
+        g = sns.relplot(
+            x="epsilon",
+            y="fpr",
+            kind="line",
+            data=df[rows_per_replication * (i - 1) : rows_per_replication * i],
+            hue="n",
+            hue_order=["100", "200", "300", "400", "500", "1000"],
+            palette=palette_map,
+        )
+        g._legend.texts[0].set_text("")
+        plt.xlabel(r"$\epsilon$")
+        plt.ylabel("False Positive Rate")
+        plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
+        plt.xticks(
+            ticks=np.linspace(0, 1, 11),
+            labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0],
+        )
+        plt.ylim((0, 1.01))
+        plt.savefig(rootdir / str(i) / ("fpr" + ablation + ".png"))
+        closefig()
+
+
+def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str):
+    g = sns.relplot(
+        x="epsilon",
+        y="tpf",
+        hue="n",
+        kind="line",
+        palette=palette_map,
+        data=df,
+        ci=80,
+        hue_order=["100", "200", "300", "400", "500", "1000"],
+        legend="brief",
+    )
+    g._legend.texts[0].set_text("")
+    plt.xlabel(r"$\epsilon$")
+    plt.ylabel("\% True Positives")
+    plt.title(r"$\epsilon$-Relaxation's Effect on TP \%")
+    plt.xticks(
+        ticks=np.linspace(0, 1, 11),
+        labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0],
+    )
+    plt.ylim((0, 1.01))
+    plt.savefig(rootdir / ("tp" + ablation + ".png"))
+
+
+def plot_individual_tp(df: pd.DataFrame, rootdir: Path, ablation: str):
+    for i in range(1, n_replications + 1):
+        g = sns.relplot(
+            x="epsilon",
+            y="tpf",
+            hue="n",
+            kind="line",
+            palette=palette_map,
+            data=df[rows_per_replication * (i - 1) : rows_per_replication * i],
+            ci=80,
+            hue_order=["100", "200", "300", "400", "500", "1000"],
+            legend="brief",
+        )
+        g._legend.texts[0].set_text("")
+        plt.xlabel(r"$\epsilon$")
+        plt.ylabel("\% True Positives")
+        plt.title(r"$\epsilon$-Relaxation's Effect on TP \%")
+        plt.xticks(
+            ticks=np.linspace(0, 1, 11),
+            labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0],
+        )
+        plt.ylim((0, 1.01))
+        plt.savefig(rootdir / str(i) / ("tp" + ablation + ".png"))
+        closefig()
 
 
 ######################
 # No simulated noise #
 ######################
 #%%
-skip_noise = get_df(Path("questions"), ".skip_noise")
-skip_lp = get_df(Path("questions"), ".skip_noise.skip_lp")
+
+rootdir = Path("questions")
+
+skip_noise = get_df(rootdir, ".skip_noise")
+# skip_lp = get_df(rootdir, ".skip_noise.skip_lp")
 
 rows_per_replication = skip_noise.epsilon.unique().size * skip_noise.n.unique().size
 first_experiment = skip_noise.iloc[:rows_per_replication]
 
 #%%
-plot_fpr(skip_noise, Path("questions"), ".skip_noise")
-plot_fpr(skip_lp, Path("questions"), ".skip_noise.skip_lp")
+plot_fpr(skip_noise, rootdir, ".skip_noise")
+# plot_fpr(skip_lp, rootdir, ".skip_noise.skip_lp")
+
+plot_individual_fpr(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
+
+plot_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
+plot_individual_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
 
 #%%
-g = sns.relplot(
-    x="epsilon",
-    y="fpr",
-    kind="line",
-    data=first_experiment,
-    hue="n",
-    hue_order=["100", "200", "300", "400", "500", "1000"],
-    palette=palette_map,
-)
-g._legend.texts[0].set_text("")
-
 ###################
 # Simulated Noise #
 ###################
-
-#%%
 
 rootdir = Path("noisy-questions")
 
@@ -134,71 +219,3 @@ noise_without_filtering = get_df(rootdir=rootdir, ablation="")
 #%%
 plot_fpr(df=noise_with_filtering, rootdir=rootdir, ablation=".skip_noise")
 plot_fpr(df=noise_without_filtering, rootdir=rootdir, ablation="")
-
-### SINGLE PLOTS/DEPRECATED
-
-#%%
-
-# rootdir = Path("questions")
-# ablation = ".skip_noise"
-
-# results = pickle.load(open(rootdir / str(1) / ("out" + ablation + ".pkl"), "rb"))
-# by_n = nest_by_second(results)
-
-
-# #%%
-# for n in ns:
-#     epsilons = list(by_n[n].keys())[1:]
-#     if len(epsilons) > 1:
-#         fprs = [by_n[n][e][0][1] / np.sum(by_n[n][e][0]) for e in epsilons]
-#         plt.plot([0.0] + epsilons, [0.0] + fprs, label=str(n))
-# plt.xlabel(r"$\epsilon$")
-# plt.ylabel("False Positive Rate")
-# plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
-# plt.xticks(
-#     ticks=np.linspace(0, 1, 11), labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0]
-# )
-# plt.ylim((0, 1.01))
-# plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
-# # plt.savefig(Path("plots") / str(replication) / "fpr", bbox_inches="tight")
-# plt.show()
-
-
-# #%%
-# pairs = [(e, tmp[1][1]) for e, tmp in by_n[1000].items() if e != 0.0]
-# epsilons = [e for e, _ in pairs]
-# tps = [tp / 10000 for _, tp in pairs]
-# plt.plot([0.0] + epsilons, [0.0] + tps)
-# plt.xlabel(r"$\epsilon$")
-# plt.xticks(
-#     ticks=np.linspace(0, 1, 11), labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0]
-# )
-# plt.ylabel("\% Aligned")
-# plt.ylim((0, 1.01))
-# plt.title(r"$\epsilon$-Aligned Rewards")
-# plt.tight_layout()
-# # plt.savefig(Path("plots") / str(replication) / "tps")
-# plt.show()
-
-# #%%
-# for n in ns:
-#     epsilons = list(by_n[n].keys())
-#     precisions = [
-#         by_n[n][e][0][1] / (by_n[n][e][0][1] + by_n[n][e][1][1]) for e in epsilons
-#     ]
-#     plt.plot(epsilons, precisions, label=str(n))
-# plt.xlabel("Epsilon")
-# plt.ylabel("False Discovery Rate (FP / (FP + TN))")
-# plt.ylim((0, 1.01))
-# plt.legend()
-# plt.show()
-# #%%
-# for n in ns:
-#     epsilons = list(by_n[n].keys())
-#     fps = [by_n[n][e][0][1] for e in epsilons]
-#     plt.plot(epsilons, fps, label=str(n))
-# plt.xlabel("Epsilon")
-# plt.ylabel("False Positives")
-# plt.ylim((0, 10000))
-# plt.legend()
-# plt.show()
