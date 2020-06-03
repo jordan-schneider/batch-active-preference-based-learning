@@ -84,8 +84,26 @@ def run_tests(
     skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
-):
+    replications: Optional[int] = None,
+) -> None:
     """ Run tests with full data to determine how much reward noise gets"""
+    if replications is not None:
+        for replication in range(1, replications + 1):
+            run_tests(
+                epsilons,
+                n_rewards,
+                human_samples,
+                n_model_samples,
+                normals_name,
+                preferences_name,
+                datadir / str(replication),
+                skip_remove_duplicates,
+                skip_noise_filtering,
+                skip_epsilon_filtering,
+                skip_redundancy_filtering,
+            )
+        return
+
     normals = np.load(datadir / normals_name)
     preferences = np.load(datadir / preferences_name)
 
