@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt  # type: ignore
 
 #%%
 plt.rc("text", usetex=True)
-plt.rcParams.update({"font.size": 22})
+plt.rcParams.update({"font.size": 33})
 
 interactive = getattr(sys, "ps1", None) is not None
 
@@ -33,7 +33,10 @@ palette = sns.color_palette("muted", len(ns))
 palette_map = {str(n): palette[i] for i, n in enumerate(sorted(ns))}
 
 
-n_replications = 5
+n_replications = 10
+
+xticks = np.linspace(0, 1.5, 16)
+xlabels = [0.0, "", "", "", "", 0.5, "", "", "", "", 1.0, "", "", "", "", 1.5]
 
 
 def nest_by_second(
@@ -63,14 +66,13 @@ def get_df(rootdir: Path, ablation: str):
             lambda x: [
                 int(x.confusion[0][0]),
                 int(x.confusion[0][1]),
+                int(x.confusion[1][0]),
                 int(x.confusion[1][1]),
-            ]
-            if x.confusion.shape == (2, 2)
-            else [10000, 0, 0],
+            ],
             result_type="expand",
             axis="columns",
         )
-        tmp.columns = ["tn", "fp", "tp"]
+        tmp.columns = ["tn", "fp", "fn", "tp"]
         tmp = tmp.reset_index()
         df = df.append(tmp)
 
@@ -80,11 +82,15 @@ def get_df(rootdir: Path, ablation: str):
     df["n"] = df["n"].astype(str)
     df["fpr"] = df.fp / (df.fp + df.tn)
     df["tpf"] = df.tp / (df.tp + df.fp + df.tn)
+    df["fnr"] = df.fn / (df.fn + df.tp)
 
     return df
 
 
 def plot_fpr(df: pd.DataFrame, rootdir: Path, ablation: str):
+
+    plt.figure(figsize=(10, 10))
+
     g = sns.relplot(
         x="epsilon",
         y="fpr",
@@ -95,6 +101,7 @@ def plot_fpr(df: pd.DataFrame, rootdir: Path, ablation: str):
         ci=80,
         hue_order=["100", "200", "300", "400", "500", "1000"],
         legend="brief",
+        aspect=2,
     )
 
     g._legend.texts[0].set_text("")
@@ -103,11 +110,40 @@ def plot_fpr(df: pd.DataFrame, rootdir: Path, ablation: str):
     plt.ylabel("False Postive Rate")
     plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
     plt.xticks(
-        ticks=np.linspace(0, 1, 11),
-        labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0],
+        ticks=xticks, labels=xlabels,
     )
     plt.ylim((0, 1.01))
     plt.savefig(rootdir / ("fpr" + ablation + ".png"))
+    closefig()
+
+
+def plot_fnr(df: pd.DataFrame, rootdir: Path, ablation: str):
+
+    plt.figure(figsize=(10, 10))
+
+    g = sns.relplot(
+        x="epsilon",
+        y="fnr",
+        hue="n",
+        kind="line",
+        palette=palette_map,
+        data=df,
+        ci=80,
+        hue_order=["100", "200", "300", "400", "500", "1000"],
+        legend="brief",
+        aspect=2,
+    )
+
+    g._legend.texts[0].set_text("")
+
+    plt.xlabel(r"$\epsilon$")
+    plt.ylabel("False Negative Rate")
+    plt.title(r"$\epsilon$-Relaxation's Effect on FNR")
+    plt.xticks(
+        ticks=xticks, labels=xlabels,
+    )
+    plt.ylim((0, 1.01))
+    plt.savefig(rootdir / ("fnr" + ablation + ".png"))
     closefig()
 
 
@@ -121,14 +157,14 @@ def plot_individual_fpr(df: pd.DataFrame, rootdir: Path, ablation: str):
             hue="n",
             hue_order=["100", "200", "300", "400", "500", "1000"],
             palette=palette_map,
+            aspect=2,
         )
         g._legend.texts[0].set_text("")
         plt.xlabel(r"$\epsilon$")
         plt.ylabel("False Positive Rate")
         plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
         plt.xticks(
-            ticks=np.linspace(0, 1, 11),
-            labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0],
+            ticks=xticks, labels=xlabels,
         )
         plt.ylim((0, 1.01))
         plt.savefig(rootdir / str(i) / ("fpr" + ablation + ".png"))
@@ -146,14 +182,14 @@ def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str):
         ci=80,
         hue_order=["100", "200", "300", "400", "500", "1000"],
         legend="brief",
+        aspect=2,
     )
     g._legend.texts[0].set_text("")
     plt.xlabel(r"$\epsilon$")
     plt.ylabel("\% True Positives")
     plt.title(r"$\epsilon$-Relaxation's Effect on TP \%")
     plt.xticks(
-        ticks=np.linspace(0, 1, 11),
-        labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0],
+        ticks=xticks, labels=xlabels,
     )
     plt.ylim((0, 1.01))
     plt.savefig(rootdir / ("tp" + ablation + ".png"))
@@ -171,14 +207,14 @@ def plot_individual_tp(df: pd.DataFrame, rootdir: Path, ablation: str):
             ci=80,
             hue_order=["100", "200", "300", "400", "500", "1000"],
             legend="brief",
+            aspect=2,
         )
         g._legend.texts[0].set_text("")
         plt.xlabel(r"$\epsilon$")
         plt.ylabel("\% True Positives")
         plt.title(r"$\epsilon$-Relaxation's Effect on TP \%")
         plt.xticks(
-            ticks=np.linspace(0, 1, 11),
-            labels=[0.0, "", "", "", "", 0.5, "", "", "", "", 1.0],
+            ticks=xticks, labels=xlabels,
         )
         plt.ylim((0, 1.01))
         plt.savefig(rootdir / str(i) / ("tp" + ablation + ".png"))
@@ -190,22 +226,20 @@ def plot_individual_tp(df: pd.DataFrame, rootdir: Path, ablation: str):
 ######################
 #%%
 
-rootdir = Path("questions")
+# rootdir = Path("questions")
 
-skip_noise = get_df(rootdir, ".skip_noise")
-# skip_lp = get_df(rootdir, ".skip_noise.skip_lp")
+# skip_noise = get_df(rootdir, ".skip_noise")
+# # skip_lp = get_df(rootdir, ".skip_noise.skip_lp")
 
-rows_per_replication = skip_noise.epsilon.unique().size * skip_noise.n.unique().size
-first_experiment = skip_noise.iloc[:rows_per_replication]
+# rows_per_replication = skip_noise.epsilon.unique().size * skip_noise.n.unique().size
+# first_experiment = skip_noise.iloc[:rows_per_replication]
 
-#%%
-plot_fpr(skip_noise, rootdir, ".skip_noise")
-# plot_fpr(skip_lp, rootdir, ".skip_noise.skip_lp")
+# #%%
+# plot_fpr(skip_noise, rootdir, ".skip_noise")
+# # plot_individual_fpr(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
 
-plot_individual_fpr(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
-
-plot_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
-plot_individual_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
+# plot_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
+# # plot_individual_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
 
 #%%
 ###################
@@ -218,4 +252,7 @@ noise_with_filtering = get_df(rootdir=rootdir, ablation=".skip_noise")
 noise_without_filtering = get_df(rootdir=rootdir, ablation="")
 #%%
 plot_fpr(df=noise_with_filtering, rootdir=rootdir, ablation=".skip_noise")
+plot_fnr(df=noise_with_filtering, rootdir=rootdir, ablation=".skip_noise")
+
 plot_fpr(df=noise_without_filtering, rootdir=rootdir, ablation="")
+plot_fnr(df=noise_without_filtering, rootdir=rootdir, ablation="")

@@ -29,7 +29,7 @@ def normalize(vectors: np.ndarray) -> np.ndarray:
 
 
 def find_reward_boundary(
-    normals: np.ndarray, n_rewards: int
+    normals: np.ndarray, n_rewards: int, reward: np.ndarray, noise: bool
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Generates n_rewards reward weight with L2 norm of one. """
     assert_normals(normals)
@@ -38,6 +38,9 @@ def find_reward_boundary(
     dist = multivariate_normal(mean=np.zeros(N_FEATURES))
 
     rewards = normalize(dist.rvs(size=n_rewards))
+
+    if noise:
+        normals = normals[np.dot(reward, normals.T) > 0]
 
     ground_truth_alignment = np.all(np.dot(rewards, normals.T) > 0, axis=1)
 
@@ -63,9 +66,32 @@ def run_test(
         print(
             f"predicted true={np.sum(results)}, predicted false={results.shape[0] - np.sum(results)}"
         )
-        return confusion_matrix(y_true=aligned, y_pred=results)
+        return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
     else:
-        return confusion_matrix(y_true=aligned, y_pred=np.ones(aligned.shape))
+        return confusion_matrix(
+            y_true=aligned,
+            y_pred=np.ones(aligned.shape, dtype=bool),
+            labels=[False, True],
+        )
+
+
+def make_outname(
+    skip_remove_duplicates: bool,
+    skip_noise_filtering: bool,
+    skip_epsilon_filtering: bool,
+    skip_redundancy_filtering: bool,
+) -> str:
+    outname = "out"
+    if skip_remove_duplicates:
+        outname += ".skip_duplicates"
+    if skip_noise_filtering:
+        outname += ".skip_noise"
+    if skip_epsilon_filtering:
+        outname += ".skip_epsilon"
+    if skip_redundancy_filtering:
+        outname += ".skip_lp"
+    outname += ".pkl"
+    return outname
 
 
 @arg("--epsilons", nargs="+", type=float)
@@ -82,11 +108,14 @@ def run_tests(
     skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
-    replications: Optional[int] = None,
+    replications: Optional[str] = None,
+    noise: bool = False,
+    overwrite: bool = False,
 ) -> None:
     """ Run tests with full data to determine how much reward noise gets"""
     if replications is not None:
-        for replication in range(1, replications + 1):
+        start, stop = replications.split("-")
+        for replication in range(int(start), int(stop) + 1):
             run_tests(
                 epsilons,
                 n_rewards,
@@ -99,11 +128,14 @@ def run_tests(
                 skip_noise_filtering,
                 skip_epsilon_filtering,
                 skip_redundancy_filtering,
+                noise=noise,
+                overwrite=overwrite,
             )
         return
 
     normals = np.load(datadir / normals_name)
     preferences = np.load(datadir / preferences_name)
+    reward = np.load(datadir / "reward.npy")
 
     assert preferences.shape[0] > 0
 
@@ -111,8 +143,28 @@ def run_tests(
 
     assert_normals(normals)
 
-    results: Dict[Tuple[float, int], np.ndarray] = dict()
+    assert reward.shape == (4,)
+
+    outpath = datadir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+    )
+
+    results: Dict[Tuple[float, int], np.ndarray]
+    results = (
+        pickle.load(open(outpath, "rb"))
+        if outpath.exists() and not overwrite
+        else dict()
+    )
+
     for epsilon in epsilons:
+        if not overwrite and all(
+            [(epsilon, n) in results.keys() for n in human_samples]
+        ):
+            continue
+
         filtered_normals, _ = filter_halfplanes(
             normals=normals,
             n_samples=n_model_samples,
@@ -121,11 +173,16 @@ def run_tests(
             skip_remove_duplicates=True,
             skip_redundancy_filtering=True,
         )
-        rewards, aligned = find_reward_boundary(filtered_normals, n_rewards)
+        rewards, aligned = find_reward_boundary(
+            filtered_normals, n_rewards, reward, noise
+        )
         print(
             f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}"
         )
         for n in human_samples:
+            if not overwrite and (epsilon, n) in results.keys():
+                continue
+
             print(f"Working on epsilon={epsilon}, n={n}")
             filtered_normals = normals[:n]
             filtered_normals, _ = filter_halfplanes(
@@ -138,22 +195,15 @@ def run_tests(
                 skip_redundancy_filtering=skip_redundancy_filtering,
             )
 
-            results[(epsilon, n)] = run_test(
+            confusion = run_test(
                 normals=filtered_normals, fake_rewards=rewards, aligned=aligned,
             )
 
-    outname = "out"
-    if skip_remove_duplicates:
-        outname += ".skip_duplicates"
-    if skip_noise_filtering:
-        outname += ".skip_noise"
-    if skip_epsilon_filtering:
-        outname += ".skip_epsilon"
-    if skip_redundancy_filtering:
-        outname += ".skip_lp"
-    outname += ".pkl"
+            assert confusion.shape == (2, 2)
 
-    pickle.dump(results, open(datadir / outname, "wb"))
+            results[(epsilon, n)] = confusion
+
+    pickle.dump(results, open(outpath, "wb"))
 
 
 if __name__ == "__main__":
