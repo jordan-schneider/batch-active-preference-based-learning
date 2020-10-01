@@ -16,3 +16,5 @@ scratch.py
 *.pkl
 
 *.png
+
+log*.txt
