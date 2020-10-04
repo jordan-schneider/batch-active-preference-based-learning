@@ -1,12 +1,17 @@
+from typing import Tuple
+
 import numpy as np
 import scipy.optimize as opt
 
 import algos
 import visualize
 from models import Driver, LunarLander, MountainCar, Swimmer, Tosser
+from simulator import Simulation
 
 
-def get_feedback(simulation_object, input_A, input_B):
+def get_feedback(
+    simulation_object: Simulation, input_A: np.ndarray, input_B: np.ndarray
+) -> Tuple[np.ndarray, int]:
     simulation_object.feed(input_A)
     phi_A = simulation_object.get_features()
     simulation_object.feed(input_B)
