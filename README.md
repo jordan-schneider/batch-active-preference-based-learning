@@ -1,3 +1,31 @@
+This code elicits preferences between trajectories from humans, distills those preferences into a
+minimal alignment test, and then tests a number of randomly generated agents.
+
+To run:
+1. Run the following once if the ctrl_samples directory is empty or does not currently exist.
+```python
+	python input_sampler.py driver 500000
+``` 
+1. Run the following to start the inference procedure. You should press both `a` and `b` every iteration to watch the trajectories, and press either `1` or `2` to select the trajectory you like more. Press `space` to start each video, and press `Esc` to exit the video and return to the prompt.
+```python
+	python demos.py --N=110 --M=1000 --b=10 --outdir=human/[subject-id]
+```
+
+If at any time you get bored/want to give up, press `Ctrl-C` EXACTLY ONCE and wait a moment to save
+your progress. I'd really appreciate if you could give 110 preferences, but any amount is fine.
+
+I haven't implemented hot-reloading. If you've accidentally exited midway and want to resume, let me
+know and I can throw something together. It would be best if you could just keep the terminal open
+and/or do it all in one sitting.
+
+
+This code is a fork of https://github.com/Stanford-ILIAD/batch-active-preference-based-learning
+
+The novel contributions are in post.py and run_test.py. 
+
+
+---
+
 This code learns reward functions from human preferences in various tasks by actively generating batches of scenarios and querying a human expert.
 
 Companion code to [CoRL 2018 paper](https://arxiv.org/abs/1810.04303):  
