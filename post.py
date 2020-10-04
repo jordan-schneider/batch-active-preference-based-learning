@@ -1,7 +1,5 @@
 """ Post-process noise and consistency filtering. """
 
-#%%
-
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -13,8 +11,6 @@ from scipy.spatial import distance  # type: ignore
 from linear_programming import remove_redundant_constraints
 from sampling import Sampler
 from simulation_utils import create_env
-
-#%%
 
 
 def sample(reward_dimension: int, normals: np.ndarray, n_samples: int,) -> np.ndarray:
@@ -119,47 +115,3 @@ def filter_halfplanes(
         print(f"After removing redundancies there are {len(indices)} questions.")
 
     return filtered_normals, indices
-
-
-#%%
-
-
-@arg("n-samples", type=int)
-@arg("--n-human-samples", type=int)
-def main(
-    n_samples: int,
-    *,
-    datadir: Path = Path("questions"),
-    epsilon: float = 0.0,
-    delta: float = 0.05,
-    n_human_samples: Optional[int] = None,
-) -> None:
-    normals = np.load(datadir / "normals.npy")
-    preferences = np.load(datadir / "preferences.npy")
-
-    normals = (normals.T * preferences).T
-
-    if n_human_samples is not None:
-        normals = normals[:n_human_samples]
-
-    normals, indices = filter_halfplanes(
-        normals=normals, n_samples=n_samples, epsilon=epsilon, delta=delta,
-    )
-    np.save(datadir / "filtered_normals", normals)
-
-    inputs = np.load(datadir / "inputs.npy")
-    a_inputs = inputs[:, 0, :, :].reshape(
-        inputs.shape[0] * inputs.shape[2], inputs.shape[3]
-    )
-    b_inputs = inputs[:, 1, :, :].reshape(
-        inputs.shape[0] * inputs.shape[2], inputs.shape[3]
-    )
-    inputs = np.array([a_inputs, b_inputs])
-    if n_human_samples is not None:
-        inputs = inputs[:, :n_human_samples]
-    inputs = inputs[:, indices]
-    np.save(datadir / "filtered_inputs", inputs)
-
-
-if __name__ == "__main__":
-    argh.dispatch_command(main)
