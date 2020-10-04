@@ -171,6 +171,26 @@ def plot_individual_fpr(df: pd.DataFrame, rootdir: Path, ablation: str):
         closefig()
 
 
+def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n):
+    df = df[df.n == n]
+
+    plt.figure(figsize=(10, 10))
+
+    g = sns.relplot(
+        x="epsilon", y="fpr", kind="line", data=df, ci=80, legend="brief", aspect=2,
+    )
+
+    plt.xlabel(r"$\epsilon$")
+    plt.ylabel("False Postive Rate")
+    plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
+    plt.xticks(
+        ticks=xticks, labels=xlabels,
+    )
+    # plt.ylim((0, 1.01))
+    plt.savefig(rootdir / ("fpr.largest" + ablation + ".png"))
+    closefig()
+
+
 def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str):
     g = sns.relplot(
         x="epsilon",
@@ -226,16 +246,16 @@ def plot_individual_tp(df: pd.DataFrame, rootdir: Path, ablation: str):
 ######################
 #%%
 
-# rootdir = Path("questions")
+rootdir = Path("questions")
 
-# skip_noise = get_df(rootdir, ".skip_noise")
-# # skip_lp = get_df(rootdir, ".skip_noise.skip_lp")
+skip_noise = get_df(rootdir, ".skip_noise")
+# skip_lp = get_df(rootdir, ".skip_noise.skip_lp")
 
 # rows_per_replication = skip_noise.epsilon.unique().size * skip_noise.n.unique().size
 # first_experiment = skip_noise.iloc[:rows_per_replication]
 
 # #%%
-# plot_fpr(skip_noise, rootdir, ".skip_noise")
+plot_largest_fpr(skip_noise, rootdir, ".skip_noise", n="1000")
 # # plot_individual_fpr(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
 
 # plot_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
@@ -248,11 +268,18 @@ def plot_individual_tp(df: pd.DataFrame, rootdir: Path, ablation: str):
 
 rootdir = Path("noisy-questions")
 
-noise_with_filtering = get_df(rootdir=rootdir, ablation=".skip_noise")
-noise_without_filtering = get_df(rootdir=rootdir, ablation="")
-#%%
-plot_fpr(df=noise_with_filtering, rootdir=rootdir, ablation=".skip_noise")
-plot_fnr(df=noise_with_filtering, rootdir=rootdir, ablation=".skip_noise")
+noise_with_filtering = get_df(rootdir=rootdir, ablation="")
+noise_without_filtering = get_df(rootdir=rootdir, ablation=".skip_noise")
 
-plot_fpr(df=noise_without_filtering, rootdir=rootdir, ablation="")
-plot_fnr(df=noise_without_filtering, rootdir=rootdir, ablation="")
+#%%
+# plot_fpr(df=noise_with_filtering, rootdir=rootdir, ablation=".skip_noise")
+# plot_fnr(df=noise_with_filtering, rootdir=rootdir, ablation=".skip_noise")
+
+# plot_fpr(df=noise_without_filtering, rootdir=rootdir, ablation="")
+# plot_fnr(df=noise_without_filtering, rootdir=rootdir, ablation="")
+
+plot_largest_fpr(df=noise_with_filtering, rootdir=rootdir, ablation="", n="1000")
+plot_largest_fpr(
+    df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise", n="1000"
+)
+
