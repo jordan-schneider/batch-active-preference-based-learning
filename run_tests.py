@@ -29,7 +29,7 @@ def normalize(vectors: np.ndarray) -> np.ndarray:
 
 
 def find_reward_boundary(
-    normals: np.ndarray, n_rewards: int, reward: np.ndarray, noise: bool
+    normals: np.ndarray, n_rewards: int, reward: np.ndarray, epsilon: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Generates n_rewards reward weight with L2 norm of one. """
     assert_normals(normals)
@@ -39,8 +39,7 @@ def find_reward_boundary(
 
     rewards = normalize(dist.rvs(size=n_rewards))
 
-    if noise:
-        normals = normals[np.dot(reward, normals.T) > 0]
+    normals = normals[np.dot(reward, normals.T) > epsilon]
 
     ground_truth_alignment = np.all(np.dot(rewards, normals.T) > 0, axis=1)
 
@@ -80,8 +79,9 @@ def make_outname(
     skip_noise_filtering: bool,
     skip_epsilon_filtering: bool,
     skip_redundancy_filtering: bool,
+    base: str = "out",
 ) -> str:
-    outname = "out"
+    outname = base
     if skip_remove_duplicates:
         outname += ".skip_duplicates"
     if skip_noise_filtering:
@@ -145,17 +145,31 @@ def run_tests(
 
     assert reward.shape == (4,)
 
-    outpath = datadir / make_outname(
+    confusion_path = datadir / make_outname(
         skip_remove_duplicates,
         skip_noise_filtering,
         skip_epsilon_filtering,
         skip_redundancy_filtering,
     )
+    test_path = datadir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="indices",
+    )
 
     results: Dict[Tuple[float, int], np.ndarray]
     results = (
-        pickle.load(open(outpath, "rb"))
-        if outpath.exists() and not overwrite
+        pickle.load(open(confusion_path, "rb"))
+        if confusion_path.exists() and not overwrite
+        else dict()
+    )
+
+    minimal_tests: Dict[Tuple[float, int], np.ndarray]
+    minimal_tests = (
+        pickle.load(open(test_path, "rb"))
+        if test_path.exists() and not overwrite
         else dict()
     )
 
@@ -165,17 +179,7 @@ def run_tests(
         ):
             continue
 
-        filtered_normals, _ = filter_halfplanes(
-            normals=normals,
-            n_samples=n_model_samples,
-            epsilon=epsilon,
-            skip_noise_filtering=True,
-            skip_remove_duplicates=True,
-            skip_redundancy_filtering=True,
-        )
-        rewards, aligned = find_reward_boundary(
-            filtered_normals, n_rewards, reward, noise
-        )
+        rewards, aligned = find_reward_boundary(normals, n_rewards, reward, epsilon)
         print(
             f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}"
         )
@@ -185,7 +189,7 @@ def run_tests(
 
             print(f"Working on epsilon={epsilon}, n={n}")
             filtered_normals = normals[:n]
-            filtered_normals, _ = filter_halfplanes(
+            filtered_normals, indices = filter_halfplanes(
                 normals=filtered_normals,
                 n_samples=n_model_samples,
                 epsilon=epsilon,
@@ -195,6 +199,8 @@ def run_tests(
                 skip_redundancy_filtering=skip_redundancy_filtering,
             )
 
+            minimal_tests[(epsilon, n)] = indices
+
             confusion = run_test(
                 normals=filtered_normals, fake_rewards=rewards, aligned=aligned,
             )
@@ -203,7 +209,8 @@ def run_tests(
 
             results[(epsilon, n)] = confusion
 
-    pickle.dump(results, open(outpath, "wb"))
+    pickle.dump(results, open(confusion_path, "wb"))
+    pickle.dump(minimal_tests, open(test_path, "wb"))
 
 
 if __name__ == "__main__":
