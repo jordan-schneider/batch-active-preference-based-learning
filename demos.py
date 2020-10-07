@@ -171,12 +171,12 @@ def batch(
 
     try:
         for _ in range(b, N, b):
+            if not simulate_human:
+                print("Thinking...")
             a_inputs, b_inputs = sample_inputs(
                 normals, preferences, w_sampler, simulation_object, M, b, B
             )
-            if not simulate_human:
-                print("Thinking...")
-            inputs = update_inputs(a_inputs, b_inputs, inputs, outdir)
+           inputs = update_inputs(a_inputs, b_inputs, inputs, outdir)
             normals, preference = elicit_preferences(
                 a_inputs,
                 b_inputs,
