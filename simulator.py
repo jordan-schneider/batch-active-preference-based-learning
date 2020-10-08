@@ -3,13 +3,14 @@ import time
 
 import gym
 import numpy as np
-from mujoco_py import MjSim, MjViewer, load_model_from_path
 
 import car
 import dynamics
 import lane
 import visualize
 from world import World
+
+# from mujoco_py import MjSim, MjViewer, load_model_from_path
 
 
 class Simulation(object):
