@@ -197,7 +197,7 @@ def batch(
     inputs: np.ndarray = load(outdir, filename="inputs.npy", overwrite=overwrite)
 
     try:
-        if not inputs or len(inputs) == 0:
+        if inputs is None or len(inputs) == 0:
             # If this is the first iteration, make random inputs
             a_inputs, b_inputs = make_random_inputs(simulation_object, b)
             inputs = update_inputs(a_inputs, b_inputs, inputs, outdir)
