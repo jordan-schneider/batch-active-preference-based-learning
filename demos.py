@@ -196,35 +196,35 @@ def batch(
     )
     inputs: np.ndarray = load(outdir, filename="inputs.npy", overwrite=overwrite)
 
-    if len(inputs) == 0:
-        # If this is the first iteration, make random inputs
-        a_inputs, b_inputs = make_random_inputs(simulation_object, b)
-        inputs = update_inputs(a_inputs, b_inputs, inputs, outdir)
-        normals, preferences = elicit_preferences(
-            a_inputs,
-            b_inputs,
-            simulation_object,
-            normals,
-            preferences,
-            outdir,
-            get_prefs,
-        )
-    elif len(inputs) * b > len(preferences):
-        # If we exit in the middle of a batch, we need to finish up the rest of the batch
-        last_index = len(preferences) % b
-        a_inputs, b_inputs = inputs[-1, :, last_index:]
-        assert len(a_inputs) == len(inputs) * b - len(preferences)
-        normals, preferences = elicit_preferences(
-            a_inputs,
-            b_inputs,
-            simulation_object,
-            normals,
-            preferences,
-            outdir,
-            get_prefs,
-        )
-
     try:
+        if not inputs or len(inputs) == 0:
+            # If this is the first iteration, make random inputs
+            a_inputs, b_inputs = make_random_inputs(simulation_object, b)
+            inputs = update_inputs(a_inputs, b_inputs, inputs, outdir)
+            normals, preferences = elicit_preferences(
+                a_inputs,
+                b_inputs,
+                simulation_object,
+                normals,
+                preferences,
+                outdir,
+                get_prefs,
+            )
+        elif len(inputs) * b > len(preferences):
+            # If we exit in the middle of a batch, we need to finish up the rest of the batch
+            last_index = len(preferences) % b
+            a_inputs, b_inputs = inputs[-1, :, last_index:]
+            assert len(a_inputs) == len(inputs) * b - len(preferences)
+            normals, preferences = elicit_preferences(
+                a_inputs,
+                b_inputs,
+                simulation_object,
+                normals,
+                preferences,
+                outdir,
+                get_prefs,
+            )
+
         for _ in range(len(inputs) * b, N, b):
             if not simulate_human:
                 print("Thinking...")
