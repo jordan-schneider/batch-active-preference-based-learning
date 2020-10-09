@@ -21,7 +21,7 @@ def append(a: Optional[np.ndarray], b: Union[np.ndarray, int]) -> np.ndarray:
         if isinstance(b, np.ndarray):
             return b.reshape(1, *b.shape)
         elif isinstance(b, int):
-            return np.ndarray(b).reshape((1,))
+            return np.array([b])
     else:
         if isinstance(b, np.ndarray):
             return np.append(a, b.reshape((1, *b.shape)), axis=0)
