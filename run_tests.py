@@ -18,9 +18,16 @@ N_FEATURES = 4
 
 
 def assert_normals(normals: np.ndarray) -> None:
+    """ Asserts the given array is an array of normal vectors defining half space constraints."""
     shape = normals.shape
     assert len(shape) == 2
     assert shape[1] == N_FEATURES
+
+
+def assert_reward(reward: np.ndarray) -> None:
+    """ Asserts the given array is might be a reward feature vector. """
+    assert reward.shape == (N_FEATURES,)
+    assert abs(norm(reward) - 1) < 0.000001
 
 
 def normalize(vectors: np.ndarray) -> np.ndarray:
@@ -28,16 +35,24 @@ def normalize(vectors: np.ndarray) -> np.ndarray:
     return (vectors.T / norm(vectors, axis=1)).T
 
 
+def make_rewards(n_rewards: int) -> np.ndarray:
+    """ Makes n_rewards uniformly sampled reward vectors of unit length."""
+    assert n_rewards > 0
+    dist = multivariate_normal(mean=np.zeros(N_FEATURES))
+    rewards = normalize(dist.rvs(size=n_rewards))
+    return rewards
+
+
 def find_reward_boundary(
     normals: np.ndarray, n_rewards: int, reward: np.ndarray, epsilon: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """ Generates n_rewards reward weight with L2 norm of one. """
+    """ Generates n_rewards reward vectors and determines which are aligned. """
     assert_normals(normals)
     assert n_rewards > 0
+    assert epsilon >= 0.0
+    assert_reward(reward)
 
-    dist = multivariate_normal(mean=np.zeros(N_FEATURES))
-
-    rewards = normalize(dist.rvs(size=n_rewards))
+    rewards = make_rewards(n_rewards)
 
     normals = normals[np.dot(reward, normals.T) > epsilon]
 
@@ -49,19 +64,24 @@ def find_reward_boundary(
     return rewards, ground_truth_alignment
 
 
-def run_test(
+def run_test(normals: np.ndarray, fake_rewards: np.ndarray) -> np.ndarray:
+    """ Returns the predicted alignment of the fake rewards by the normals. """
+    assert_normals(normals)
+    results = np.all(np.dot(fake_rewards, normals.T) > 0, axis=1)
+    return results
+
+
+def eval_test(
     normals: np.ndarray, fake_rewards: np.ndarray, aligned: np.ndarray,
 ) -> np.ndarray:
-    """Runs an alignment test on randomly generated fake reward weights. """
-    assert_normals(normals)
-    assert len(fake_rewards.shape) == 2
+    """ Makes a confusion matrix by evaluating a test on the fake rewards. """
     assert fake_rewards.shape[0] == aligned.shape[0]
 
     for fake_reward in fake_rewards:
-        assert np.abs(norm(fake_reward) - 1) < 0.0001
+        assert_reward(fake_reward)
 
     if normals.shape[0] > 0:
-        results = np.all(np.dot(fake_rewards, normals.T) > 0, axis=1)
+        results = run_test(normals, fake_rewards)
         print(
             f"predicted true={np.sum(results)}, predicted false={results.shape[0] - np.sum(results)}"
         )
@@ -96,27 +116,27 @@ def make_outname(
 
 @arg("--epsilons", nargs="+", type=float)
 @arg("--human-samples", nargs="+", type=int)
-def run_tests(
+def gt(
     epsilons: List[float] = [0.0],
     n_rewards: int = 100,
     human_samples: List[int] = [1],
     n_model_samples: int = 1000,
     normals_name: Path = Path("normals.npy"),
     preferences_name: Path = Path("preferences.npy"),
+    true_reward_name: Path = Path("true_reward.npy"),
     datadir: Path = Path("questions"),
     skip_remove_duplicates: bool = False,
     skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
     replications: Optional[str] = None,
-    noise: bool = False,
     overwrite: bool = False,
 ) -> None:
     """ Run tests with full data to determine how much reward noise gets"""
     if replications is not None:
         start, stop = replications.split("-")
         for replication in range(int(start), int(stop) + 1):
-            run_tests(
+            gt(
                 epsilons,
                 n_rewards,
                 human_samples,
@@ -128,28 +148,27 @@ def run_tests(
                 skip_noise_filtering,
                 skip_epsilon_filtering,
                 skip_redundancy_filtering,
-                noise=noise,
                 overwrite=overwrite,
             )
         return
 
     normals = np.load(datadir / normals_name)
     preferences = np.load(datadir / preferences_name)
-    reward = np.load(datadir / "reward.npy")
+    reward = np.load(datadir / true_reward_name)
 
     assert preferences.shape[0] > 0
+    assert normals.shape[0] > 0
+    assert reward.shape == (N_FEATURES,)
 
     normals = (normals.T * preferences).T
-
     assert_normals(normals)
-
-    assert reward.shape == (4,)
 
     confusion_path = datadir / make_outname(
         skip_remove_duplicates,
         skip_noise_filtering,
         skip_epsilon_filtering,
         skip_redundancy_filtering,
+        base="confusion",
     )
     test_path = datadir / make_outname(
         skip_remove_duplicates,
@@ -201,7 +220,7 @@ def run_tests(
 
             minimal_tests[(epsilon, n)] = indices
 
-            confusion = run_test(
+            confusion = eval_test(
                 normals=filtered_normals, fake_rewards=rewards, aligned=aligned,
             )
 
@@ -213,5 +232,83 @@ def run_tests(
     pickle.dump(minimal_tests, open(test_path, "wb"))
 
 
+@arg("--epsilons", nargs="+", type=float)
+@arg("--human-samples", nargs="+", type=int)
+def human(
+    epsilons: List[float] = [0.0],
+    n_rewards: int = 100,
+    human_samples: List[int] = [1],
+    n_model_samples: int = 1000,
+    normals_name: Path = Path("normals.npy"),
+    preferences_name: Path = Path("preferences.npy"),
+    datadir: Path = Path("questions"),
+    skip_remove_duplicates: bool = False,
+    skip_noise_filtering: bool = False,
+    skip_epsilon_filtering: bool = False,
+    skip_redundancy_filtering: bool = False,
+    overwrite: bool = False,
+):
+    normals = np.load(datadir / normals_name)
+    preferences = np.load(datadir / preferences_name)
+    assert preferences.shape[0] > 0
+
+    normals = (normals.T * preferences).T
+    assert_normals(normals)
+
+    test_path = datadir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="indices",
+    )
+    test_results_path = datadir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="test_results",
+    )
+
+    minimal_tests: Dict[Tuple[float, int], np.ndarray]
+    minimal_tests = (
+        pickle.load(open(test_path, "rb"))
+        if test_path.exists() and not overwrite
+        else dict()
+    )
+    results: Dict[Tuple[float, int], np.ndarray]
+    results = (
+        pickle.load(open(test_results_path, "rb"))
+        if test_results_path.exists() and not overwrite
+        else dict()
+    )
+
+    fake_rewards = make_rewards(n_rewards)
+
+    for epsilon in epsilons:
+        for n in human_samples:
+            if not overwrite and (epsilon, n) in minimal_tests.keys():
+                continue
+
+            print(f"Working on epsilon={epsilon}, n={n}")
+            filtered_normals = normals[:n]
+            filtered_normals, indices = filter_halfplanes(
+                normals=filtered_normals,
+                n_samples=n_model_samples,
+                epsilon=epsilon,
+                skip_remove_duplicates=skip_remove_duplicates,
+                skip_noise_filtering=skip_noise_filtering,
+                skip_epsilon_filtering=skip_epsilon_filtering,
+                skip_redundancy_filtering=skip_redundancy_filtering,
+            )
+
+            minimal_tests[(epsilon, n)] = indices
+
+            results[(epsilon, n)] = run_test(filtered_normals, fake_rewards)
+
+    pickle.dump(minimal_tests, open(test_path, "wb"))
+    pickle.dump(results, open(test_results_path, "wb"))
+
+
 if __name__ == "__main__":
-    argh.dispatch_command(run_tests)
+    argh.dispatch_commands([gt, human])

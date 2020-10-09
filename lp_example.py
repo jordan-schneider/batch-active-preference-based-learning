@@ -8,9 +8,9 @@ from run_tests import normalize, run_test
 
 
 def main():
-    reward = np.load(Path("questions/reward.npy"))
-    normals = np.load(Path("questions/normals.npy"))
-    preferences = np.load(Path("questions/preferences.npy"))
+    reward = np.load(Path("questions/1/true_reward.npy"))
+    normals = np.load(Path("questions/1/normals.npy"))
+    preferences = np.load(Path("questions/1/preferences.npy"))
 
     normals = (normals.T * preferences).T
 
@@ -34,7 +34,7 @@ def main():
         deterministic=True,
     )
     print(f"There are {len(filtered_normals)} halfplanes after filtering.")
-    frac_pass = run_test(reward, filtered_normals, fake_rewards=fake_rewards)
+    frac_pass = np.mean(run_test(normals=filtered_normals, fake_rewards=fake_rewards))
     print(
         f"With {len(filtered_normals)} questions, "
         f"{frac_pass * 100}% of the fake rewards passed the test."
@@ -49,7 +49,7 @@ def main():
         deterministic=True,
     )
     print(f"There are {len(filtered_normals)} halfplanes after filtering.")
-    frac_pass = run_test(reward, filtered_normals, fake_rewards=fake_rewards)
+    frac_pass = np.mean(run_test(normals=filtered_normals, fake_rewards=fake_rewards))
     print(
         f"With {len(filtered_normals)} questions, "
         f"{frac_pass * 100}% of the fake rewards passed the test."
