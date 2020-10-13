@@ -92,10 +92,11 @@ def filter_halfplanes(
                 n_samples=n_samples,
             )
 
+        opinions = np.dot(rewards, filtered_normals.T).T
+        correct_opinions = opinions > epsilon
+
         # Filter halfspaces that don't have 1-d probability that the expected return gap is epsilon.
-        filtered_indices = (
-            np.mean(np.dot(rewards, filtered_normals.T) > epsilon, axis=0,) > 1 - delta
-        )
+        filtered_indices = np.mean(correct_opinions, axis=1) > 1 - delta
         indices = indices[filtered_indices]
         assert all([row in filtered_normals for row in normals[indices]])
         filtered_normals = normals[indices].reshape(-1, normals.shape[1])

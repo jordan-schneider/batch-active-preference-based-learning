@@ -2,6 +2,7 @@
 are caught by the preferences."""
 
 import pickle
+from itertools import product
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -72,16 +73,16 @@ def run_test(normals: np.ndarray, fake_rewards: np.ndarray) -> np.ndarray:
 
 
 def eval_test(
-    normals: np.ndarray, fake_rewards: np.ndarray, aligned: np.ndarray,
+    normals: np.ndarray, rewards: np.ndarray, aligned: np.ndarray,
 ) -> np.ndarray:
     """ Makes a confusion matrix by evaluating a test on the fake rewards. """
-    assert fake_rewards.shape[0] == aligned.shape[0]
+    assert rewards.shape[0] == aligned.shape[0]
 
-    for fake_reward in fake_rewards:
-        assert_reward(fake_reward)
+    for reward in rewards:
+        assert_reward(reward)
 
     if normals.shape[0] > 0:
-        results = run_test(normals, fake_rewards)
+        results = run_test(normals, rewards)
         print(
             f"predicted true={np.sum(results)}, predicted false={results.shape[0] - np.sum(results)}"
         )
@@ -178,8 +179,8 @@ def gt(
         base="indices",
     )
 
-    results: Dict[Tuple[float, int], np.ndarray]
-    results = (
+    confusions: Dict[Tuple[float, int], np.ndarray]
+    confusions = (
         pickle.load(open(confusion_path, "rb"))
         if confusion_path.exists() and not overwrite
         else dict()
@@ -194,7 +195,7 @@ def gt(
 
     for epsilon in epsilons:
         if not overwrite and all(
-            [(epsilon, n) in results.keys() for n in human_samples]
+            [(epsilon, n) in confusions.keys() for n in human_samples]
         ):
             continue
 
@@ -203,7 +204,7 @@ def gt(
             f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}"
         )
         for n in human_samples:
-            if not overwrite and (epsilon, n) in results.keys():
+            if not overwrite and (epsilon, n) in confusions.keys():
                 continue
 
             print(f"Working on epsilon={epsilon}, n={n}")
@@ -226,16 +227,44 @@ def gt(
 
             assert confusion.shape == (2, 2)
 
-            results[(epsilon, n)] = confusion
+            confusions[(epsilon, n)] = confusion
 
-    pickle.dump(results, open(confusion_path, "wb"))
+    pickle.dump(confusions, open(confusion_path, "wb"))
     pickle.dump(minimal_tests, open(test_path, "wb"))
 
 
+def validate(
+    rewards: np.ndarray, prediction: np.ndarray, test: np.ndarray
+) -> np.ndarray:
+    ground_truth = run_test(test, rewards)
+    return confusion_matrix(
+        y_true=ground_truth, y_pred=prediction, labels=[False, True]
+    )
+
+
+def load(path: Path, overwrite: bool) -> dict:
+    if overwrite:
+        return dict()
+    if path.exists():
+        return pickle.load(open(path, "rb"))
+    return dict()
+
+
+def get_agreement(rewards: np.ndarray, test: np.ndarray) -> np.ndarray:
+    if len(test) > 0:
+        return np.mean(np.dot(rewards, test.T) > 0, axis=1)
+    elif len(rewards) > 0:
+        return np.ones((rewards.shape[0],), dtype=float)
+    else:
+        return None
+
+
 @arg("--epsilons", nargs="+", type=float)
+@arg("--deltas", nargs="+", type=float)
 @arg("--human-samples", nargs="+", type=int)
 def human(
     epsilons: List[float] = [0.0],
+    deltas: List[float] = [0.05],
     n_rewards: int = 100,
     human_samples: List[int] = [1],
     n_model_samples: int = 1000,
@@ -269,45 +298,59 @@ def human(
         skip_redundancy_filtering,
         base="test_results",
     )
+    agreement_path = datadir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="agreement",
+    )
 
-    minimal_tests: Dict[Tuple[float, int], np.ndarray]
-    minimal_tests = (
-        pickle.load(open(test_path, "rb"))
-        if test_path.exists() and not overwrite
-        else dict()
-    )
-    results: Dict[Tuple[float, int], np.ndarray]
-    results = (
-        pickle.load(open(test_results_path, "rb"))
-        if test_results_path.exists() and not overwrite
-        else dict()
-    )
+    Experiment = Tuple[float, float, int]
+
+    minimal_tests: Dict[Experiment, np.ndarray]
+    minimal_tests = load(test_path, overwrite)
+    results: Dict[Experiment, np.ndarray]
+    results = load(test_results_path, overwrite)
+    agreements: Dict[Experiment, Tuple[np.ndarray, np.ndarray]]
+    agreements = load(agreement_path, overwrite)
 
     fake_rewards = make_rewards(n_rewards)
+    np.save(datadir / "fake_rewards.npy", fake_rewards)
 
-    for epsilon in epsilons:
-        for n in human_samples:
-            if not overwrite and (epsilon, n) in minimal_tests.keys():
-                continue
+    for epsilon, delta, n in product(epsilons, deltas, human_samples):
+        if not overwrite and (epsilon, delta, n) in minimal_tests.keys():
+            continue
 
-            print(f"Working on epsilon={epsilon}, n={n}")
-            filtered_normals = normals[:n]
-            filtered_normals, indices = filter_halfplanes(
-                normals=filtered_normals,
-                n_samples=n_model_samples,
-                epsilon=epsilon,
-                skip_remove_duplicates=skip_remove_duplicates,
-                skip_noise_filtering=skip_noise_filtering,
-                skip_epsilon_filtering=skip_epsilon_filtering,
-                skip_redundancy_filtering=skip_redundancy_filtering,
-            )
+        print(f"Working on epsilon={epsilon}, delta={delta}, n={n}")
+        filtered_normals = normals[:n]
+        filtered_normals, indices = filter_halfplanes(
+            normals=filtered_normals,
+            n_samples=n_model_samples,
+            epsilon=epsilon,
+            delta=delta,
+            skip_remove_duplicates=skip_remove_duplicates,
+            skip_noise_filtering=skip_noise_filtering,
+            skip_epsilon_filtering=skip_epsilon_filtering,
+            skip_redundancy_filtering=skip_redundancy_filtering,
+        )
 
-            minimal_tests[(epsilon, n)] = indices
+        parameters = (epsilon, delta, n)
 
-            results[(epsilon, n)] = run_test(filtered_normals, fake_rewards)
+        minimal_tests[parameters] = indices
 
+        results = run_test(filtered_normals, fake_rewards)
+
+        pred_aligned = fake_rewards[results]
+        pred_misaligned = fake_rewards[np.logical_not(results)]
+
+        aligned_agreement = get_agreement(pred_aligned, normals[n:])
+        misaligned_agreement = get_agreement(pred_misaligned, normals[n:])
+
+        agreements[parameters] = (aligned_agreement, misaligned_agreement)
     pickle.dump(minimal_tests, open(test_path, "wb"))
     pickle.dump(results, open(test_results_path, "wb"))
+    pickle.dump(agreements, open(agreement_path, "wb"))
 
 
 if __name__ == "__main__":
