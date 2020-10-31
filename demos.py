@@ -57,26 +57,37 @@ def nonbatch(
     outdir: Path = Path("questions"),
     overwrite: bool = False,
 ):
+
     simulation_object = create_env(task)
     d = simulation_object.num_of_features
     # make this None if you will also learn delta, and change the samplers below
     # from sample_given_delta to sample (and of course remove the true_delta argument)
     true_delta = 1
+    pickle.dump(
+        {
+            "task": task,
+            "criterion": criterion,
+            "query_type": query_type,
+            "epsilon": epsilon,
+            "M": M,
+            "delta": true_delta,
+        },
+        open(outdir / "flags.pkl", "wb"),
+    )
 
     normals: np.ndarray = load(outdir, filename="normals.npy", overwrite=overwrite)
     preferences: np.ndarray = load(
         outdir, filename="preferences.npy", overwrite=overwrite
     )
     inputs: np.ndarray = load(outdir, filename="inputs.npy", overwrite=overwrite)
+    input_features: np.ndarray = load(
+        outdir, filename="input_features.npy", overwrite=overwrite
+    )
 
     w_sampler = Sampler(d)
     if inputs is not None and preferences is not None:
-        for (a_inputs, b_inputs), preference in zip(inputs, preferences):
-            simulation_object.feed(a_inputs)
-            phi_A = simulation_object.get_features()
-            simulation_object.feed(b_inputs)
-            phi_B = simulation_object.get_features()
-            w_sampler.feed(phi_A, phi_B, [preference])
+        for (a_phi, b_phi), preference in zip(input_features, preferences):
+            w_sampler.feed(a_phi, b_phi, [preference])
     score = np.inf
     try:
         while score >= epsilon:
@@ -95,8 +106,10 @@ def nonbatch(
                 phi_A, phi_B, preference = get_feedback(
                     simulation_object, input_A, input_B, query_type
                 )
+                input_features = append(input_features, np.stack([phi_A, phi_B]))
                 normals = append(normals, phi_A - phi_B)
                 preferences = append(preferences, preference)
+                np.save(outdir / "input_features.npy", input_features)
                 np.save(outdir / "normals.npy", normals)
                 np.save(outdir / "preferences.npy", preferences)
 

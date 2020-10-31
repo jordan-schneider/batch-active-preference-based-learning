@@ -115,6 +115,17 @@ def make_outname(
     return outname
 
 
+def remove_equiv(
+    preferences: np.ndarray, *arrays: np.ndarray
+) -> Tuple[np.ndarray, ...]:
+    indices = preferences != 0
+    preferences = preferences[indices]
+    out_arrays = list()
+    for array in arrays:
+        out_arrays.append(array[indices])
+    return tuple(preferences, *out_arrays)
+
+
 @arg("--epsilons", nargs="+", type=float)
 @arg("--human-samples", nargs="+", type=int)
 def gt(
@@ -122,9 +133,11 @@ def gt(
     n_rewards: int = 100,
     human_samples: List[int] = [1],
     n_model_samples: int = 1000,
+    input_features_name: Path = Path("input_features.npy"),
     normals_name: Path = Path("normals.npy"),
     preferences_name: Path = Path("preferences.npy"),
     true_reward_name: Path = Path("true_reward.npy"),
+    flags_name: Path = Path("flags.pkl"),
     datadir: Path = Path("questions"),
     skip_remove_duplicates: bool = False,
     skip_noise_filtering: bool = False,
@@ -153,10 +166,22 @@ def gt(
             )
         return
 
+    input_features = np.load(datadir / input_features_name)
     normals = np.load(datadir / normals_name)
     preferences = np.load(datadir / preferences_name)
     reward = np.load(datadir / true_reward_name)
 
+    preferences, input_features, normals = remove_equiv(
+        preferences, input_features, normals
+    )
+
+    assert not np.any(preferences == 0)
+
+    flags = pickle.load(open(datadir / flags_name, "rb"))
+    query_type = flags["query_type"]
+    equiv_probability = flags["delta"]
+
+    assert input_features.shape[0] > 0
     assert preferences.shape[0] > 0
     assert normals.shape[0] > 0
     assert reward.shape == (N_FEATURES,)
@@ -210,7 +235,11 @@ def gt(
             print(f"Working on epsilon={epsilon}, n={n}")
             filtered_normals = normals[:n]
             filtered_normals, indices = filter_halfplanes(
+                inputs_features=input_features,
                 normals=filtered_normals,
+                preferences=preferences,
+                query_type=query_type,
+                equiv_probability=equiv_probability,
                 n_samples=n_model_samples,
                 epsilon=epsilon,
                 skip_remove_duplicates=skip_remove_duplicates,
@@ -222,7 +251,7 @@ def gt(
             minimal_tests[(epsilon, n)] = indices
 
             confusion = eval_test(
-                normals=filtered_normals, fake_rewards=rewards, aligned=aligned,
+                normals=filtered_normals, rewards=rewards, aligned=aligned,
             )
 
             assert confusion.shape == (2, 2)
@@ -263,8 +292,10 @@ def human(
     n_rewards: int = 10000,
     human_samples: List[int] = [1],
     n_model_samples: int = 1000,
+    input_features_name: Path = Path("input_features.npy"),
     normals_name: Path = Path("normals.npy"),
     preferences_name: Path = Path("preferences.npy"),
+    flags_name: Path = Path("flags.pkl"),
     datadir: Path = Path("questions"),
     skip_remove_duplicates: bool = False,
     skip_noise_filtering: bool = False,
@@ -272,8 +303,14 @@ def human(
     skip_redundancy_filtering: bool = False,
     overwrite: bool = False,
 ):
+    input_features = np.load(datadir / input_features_name)
     normals = np.load(datadir / normals_name)
     preferences = np.load(datadir / preferences_name)
+
+    flags = pickle.load(open(datadir / flags_name, "rb"))
+    query_type = flags["query_type"]
+    equiv_probability = flags["delta"]
+
     assert preferences.shape[0] > 0
 
     normals = (normals.T * preferences).T
@@ -320,10 +357,13 @@ def human(
         print(f"Working on epsilon={epsilon}, delta={delta}, n={n}")
         filtered_normals = normals[:n]
         filtered_normals, indices = filter_halfplanes(
+            inputs_features=input_features,
             normals=filtered_normals,
+            preferences=preferences,
+            query_type=query_type,
+            equiv_probability=equiv_probability,
             n_samples=n_model_samples,
             epsilon=epsilon,
-            delta=delta,
             skip_remove_duplicates=skip_remove_duplicates,
             skip_noise_filtering=skip_noise_filtering,
             skip_epsilon_filtering=skip_epsilon_filtering,

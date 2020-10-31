@@ -1,11 +1,8 @@
 """ Post-process noise and consistency filtering. """
 
-from pathlib import Path
 from typing import List, Optional, Tuple
 
-import argh  # type: ignore
 import numpy as np
-from argh import arg
 from scipy.spatial import distance  # type: ignore
 
 from linear_programming import remove_redundant_constraints
@@ -13,12 +10,21 @@ from sampling import Sampler
 from simulation_utils import create_env
 
 
-def sample(reward_dimension: int, normals: np.ndarray, n_samples: int,) -> np.ndarray:
+def sample(
+    reward_dimension: int,
+    a_phis: np.ndarray,
+    b_phis: np.ndarray,
+    preferences: np.ndarray,
+    n_samples: int,
+    query_type: str,
+    delta: float,
+) -> np.ndarray:
     """ Samples n_samples rewards via MCMC. """
     w_sampler = Sampler(reward_dimension)
-    w_sampler.A = normals
-    w_sampler.y = np.ones((normals.shape[0], 1))
-    return w_sampler.sample(n_samples)
+    for a_phi, b_phi, preference in zip(a_phis, b_phis, preferences):
+        w_sampler.feed(a_phi, b_phi, [preference])
+    rewards, _ = w_sampler.sample_given_delta(n_samples, query_type, delta)
+    return rewards
 
 
 def remove_duplicates(
@@ -37,7 +43,11 @@ def remove_duplicates(
 
 
 def filter_halfplanes(
+    inputs_features: np.ndarray,
     normals: np.ndarray,
+    preferences: np.ndarray,
+    query_type: str,
+    equiv_probability: float,
     noise_threshold: float = 0.7,
     epsilon: float = 0.0,
     delta: float = 0.05,
@@ -51,6 +61,8 @@ def filter_halfplanes(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Filters test questions by removing noise answers, requiring answers have a gap of at
     least epsilon, and removing redundant questions via linear programming. """
+    a_phis = inputs_features[:, 0]
+    b_phis = inputs_features[:, 1]
     filtered_normals = normals
     indices = np.array(range(filtered_normals.shape[0]))
 
@@ -70,8 +82,12 @@ def filter_halfplanes(
 
             rewards = sample(
                 reward_dimension=create_env("driver").num_of_features,
-                normals=normals,
                 n_samples=n_samples,
+                a_phis=a_phis,
+                b_phis=b_phis,
+                preferences=preferences,
+                query_type=query_type,
+                delta=equiv_probability,
             )
 
         filtered_indices = (
@@ -88,8 +104,12 @@ def filter_halfplanes(
             # This reward generation logic is jank.
             rewards = sample(
                 reward_dimension=create_env("driver").num_of_features,
-                normals=filtered_normals,
                 n_samples=n_samples,
+                a_phis=a_phis,
+                b_phis=b_phis,
+                preferences=preferences,
+                query_type=query_type,
+                delta=equiv_probability,
             )
 
         opinions = np.dot(rewards, filtered_normals.T).T
