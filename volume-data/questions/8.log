@@ -1,0 +1,426 @@
+INFO (theano.gof.compilelock): Waiting for existing lock by process '23909' (I am process '23913')
+INFO (theano.gof.compilelock): To manually release the lock, delete /u/joschnei/.theano/compiledir_Linux-4.15--generic-x86_64-with-debian-buster-sid-x86_64-3.6.10-64/lock_dir
+INFO (theano.gof.compilelock): Waiting for existing lock by process '23819' (I am process '23913')
+INFO (theano.gof.compilelock): To manually release the lock, delete /u/joschnei/.theano/compiledir_Linux-4.15--generic-x86_64-with-debian-buster-sid-x86_64-3.6.10-64/lock_dir
+aligned=0, unaligned=100
+Working on epsilon=0.0, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 16 questions.
+After removing redundancies there are 10 questions.
+predicted true=13, predicted false=87
+Working on epsilon=0.0, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 25 questions.
+After removing redundancies there are 12 questions.
+predicted true=2, predicted false=98
+Working on epsilon=0.0, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 31 questions.
+After removing redundancies there are 8 questions.
+predicted true=1, predicted false=99
+Working on epsilon=0.0, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 38 questions.
+After removing redundancies there are 8 questions.
+predicted true=1, predicted false=99
+Working on epsilon=0.0, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 49 questions.
+After removing redundancies there are 13 questions.
+predicted true=0, predicted false=100
+Working on epsilon=0.0, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 88 questions.
+After removing redundancies there are 11 questions.
+predicted true=0, predicted false=100
+aligned=1, unaligned=99
+Working on epsilon=0.1, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 6 questions.
+After removing redundancies there are 5 questions.
+predicted true=22, predicted false=78
+Working on epsilon=0.1, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 14 questions.
+After removing redundancies there are 11 questions.
+predicted true=17, predicted false=83
+Working on epsilon=0.1, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 23 questions.
+After removing redundancies there are 11 questions.
+predicted true=4, predicted false=96
+Working on epsilon=0.1, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 27 questions.
+After removing redundancies there are 13 questions.
+predicted true=3, predicted false=97
+Working on epsilon=0.1, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 29 questions.
+After removing redundancies there are 13 questions.
+predicted true=3, predicted false=97
+Working on epsilon=0.1, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 43 questions.
+After removing redundancies there are 9 questions.
+predicted true=1, predicted false=99
+aligned=2, unaligned=98
+Working on epsilon=0.2, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 4 questions.
+After removing redundancies there are 4 questions.
+predicted true=33, predicted false=67
+Working on epsilon=0.2, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 10 questions.
+After removing redundancies there are 7 questions.
+predicted true=21, predicted false=79
+Working on epsilon=0.2, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 16 questions.
+After removing redundancies there are 12 questions.
+predicted true=10, predicted false=90
+Working on epsilon=0.2, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 18 questions.
+After removing redundancies there are 12 questions.
+predicted true=10, predicted false=90
+Working on epsilon=0.2, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 21 questions.
+After removing redundancies there are 10 questions.
+predicted true=6, predicted false=94
+Working on epsilon=0.2, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 33 questions.
+After removing redundancies there are 11 questions.
+predicted true=3, predicted false=97
+aligned=8, unaligned=92
+Working on epsilon=0.3, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 3 questions.
+After removing redundancies there are 3 questions.
+predicted true=53, predicted false=47
+Working on epsilon=0.3, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 8 questions.
+After removing redundancies there are 6 questions.
+predicted true=21, predicted false=79
+Working on epsilon=0.3, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 9 questions.
+After removing redundancies there are 6 questions.
+predicted true=16, predicted false=84
+Working on epsilon=0.3, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 10 questions.
+After removing redundancies there are 7 questions.
+predicted true=15, predicted false=85
+Working on epsilon=0.3, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 13 questions.
+After removing redundancies there are 9 questions.
+predicted true=13, predicted false=87
+Working on epsilon=0.3, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 25 questions.
+After removing redundancies there are 11 questions.
+predicted true=8, predicted false=92
+aligned=12, unaligned=88
+Working on epsilon=0.4, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.4, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 8 questions.
+After removing redundancies there are 6 questions.
+predicted true=16, predicted false=84
+Working on epsilon=0.4, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 8 questions.
+After removing redundancies there are 6 questions.
+predicted true=16, predicted false=84
+Working on epsilon=0.4, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 8 questions.
+After removing redundancies there are 6 questions.
+predicted true=16, predicted false=84
+Working on epsilon=0.4, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 11 questions.
+After removing redundancies there are 8 questions.
+predicted true=12, predicted false=88
+Working on epsilon=0.4, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 21 questions.
+After removing redundancies there are 10 questions.
+predicted true=12, predicted false=88
+aligned=15, unaligned=85
+Working on epsilon=0.5, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.5, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 3 questions.
+After removing redundancies there are 3 questions.
+predicted true=47, predicted false=53
+Working on epsilon=0.5, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 8 questions.
+After removing redundancies there are 6 questions.
+predicted true=21, predicted false=79
+Working on epsilon=0.5, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 8 questions.
+After removing redundancies there are 6 questions.
+predicted true=21, predicted false=79
+Working on epsilon=0.5, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 10 questions.
+After removing redundancies there are 8 questions.
+predicted true=17, predicted false=83
+Working on epsilon=0.5, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 20 questions.
+After removing redundancies there are 9 questions.
+predicted true=15, predicted false=85
+aligned=11, unaligned=89
+Working on epsilon=0.6, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.6, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 1 questions.
+After removing redundancies there are 1 questions.
+predicted true=56, predicted false=44
+Working on epsilon=0.6, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 1 questions.
+After removing redundancies there are 1 questions.
+predicted true=56, predicted false=44
+Working on epsilon=0.6, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 6 questions.
+After removing redundancies there are 4 questions.
+predicted true=18, predicted false=82
+Working on epsilon=0.6, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 9 questions.
+After removing redundancies there are 7 questions.
+predicted true=16, predicted false=84
+Working on epsilon=0.6, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 19 questions.
+After removing redundancies there are 8 questions.
+predicted true=11, predicted false=89
+aligned=19, unaligned=81
+Working on epsilon=0.7, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.7, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.7, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 1 questions.
+After removing redundancies there are 1 questions.
+predicted true=64, predicted false=36
+Working on epsilon=0.7, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 3 questions.
+After removing redundancies there are 3 questions.
+predicted true=58, predicted false=42
+Working on epsilon=0.7, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 6 questions.
+After removing redundancies there are 6 questions.
+predicted true=31, predicted false=69
+Working on epsilon=0.7, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 17 questions.
+After removing redundancies there are 7 questions.
+predicted true=19, predicted false=81
+aligned=21, unaligned=79
+Working on epsilon=0.8, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.8, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.8, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.8, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 1 questions.
+After removing redundancies there are 1 questions.
+predicted true=47, predicted false=53
+Working on epsilon=0.8, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 3 questions.
+After removing redundancies there are 3 questions.
+predicted true=30, predicted false=70
+Working on epsilon=0.8, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 14 questions.
+After removing redundancies there are 11 questions.
+predicted true=24, predicted false=76
+aligned=19, unaligned=81
+Working on epsilon=0.9, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.9, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.9, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.9, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=0.9, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 3 questions.
+After removing redundancies there are 3 questions.
+predicted true=25, predicted false=75
+Working on epsilon=0.9, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 12 questions.
+After removing redundancies there are 9 questions.
+predicted true=19, predicted false=81
+aligned=24, unaligned=76
+Working on epsilon=1.0, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.0, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.0, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.0, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.0, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 2 questions.
+After removing redundancies there are 2 questions.
+predicted true=52, predicted false=48
+Working on epsilon=1.0, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 12 questions.
+After removing redundancies there are 9 questions.
+predicted true=24, predicted false=76
+aligned=41, unaligned=59
+Working on epsilon=1.1, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.1, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.1, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.1, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.1, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 2 questions.
+After removing redundancies there are 2 questions.
+predicted true=51, predicted false=49
+Working on epsilon=1.1, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 11 questions.
+After removing redundancies there are 9 questions.
+predicted true=41, predicted false=59
+aligned=36, unaligned=64
+Working on epsilon=1.2, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.2, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.2, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.2, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.2, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 2 questions.
+After removing redundancies there are 2 questions.
+predicted true=42, predicted false=58
+Working on epsilon=1.2, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 9 questions.
+After removing redundancies there are 9 questions.
+predicted true=40, predicted false=60
+aligned=38, unaligned=62
+Working on epsilon=1.3, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.3, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.3, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.3, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.3, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 2 questions.
+After removing redundancies there are 2 questions.
+predicted true=43, predicted false=57
+Working on epsilon=1.3, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 9 questions.
+After removing redundancies there are 9 questions.
+predicted true=38, predicted false=62
+aligned=39, unaligned=61
+Working on epsilon=1.4, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.4, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.4, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.4, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.4, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 1 questions.
+After removing redundancies there are 1 questions.
+predicted true=49, predicted false=51
+Working on epsilon=1.4, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 7 questions.
+After removing redundancies there are 7 questions.
+predicted true=39, predicted false=61
+aligned=52, unaligned=48
+Working on epsilon=1.5, n=100
+After removing duplicates, there are 100 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.5, n=200
+After removing duplicates, there are 200 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.5, n=300
+After removing duplicates, there are 300 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.5, n=400
+After removing duplicates, there are 400 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.5, n=500
+After removing duplicates, there are 500 questions.
+After epsilon delta filtering there are 0 questions.
+Working on epsilon=1.5, n=1000
+After removing duplicates, there are 1000 questions.
+After epsilon delta filtering there are 3 questions.
+After removing redundancies there are 3 questions.
+predicted true=55, predicted false=45

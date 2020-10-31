@@ -1,16 +1,37 @@
+from pathlib import Path
+
+import fire  # type: ignore
+
 import demos
-import sys
 
-task   = sys.argv[1].lower()
-method = sys.argv[2].lower()
-N = int(sys.argv[3])
-M = int(sys.argv[4])
 
-if method == 'nonbatch' or method == 'random':
-    demos.nonbatch(task, method, N, M)
-elif method == 'greedy' or method == 'medoids' or method == 'boundary_medoids' or method == 'successive_elimination':
-    b = int(sys.argv[5])
-    demos.batch(task, method, N, M, b)
-else:
-    print('There is no method called ' + method)
+def run(
+    task: str,
+    criterion: str,
+    query_type: str,
+    epsilon: float,
+    M: int,
+    outdir: str = "questions",
+    overwrite: bool = False,
+):
+    task = task.lower()
+    criterion = criterion.lower()
+    query_type = query_type.lower()
+    outpath = Path(outdir)
+    assert (
+        criterion == "information" or criterion == "volume" or criterion == "random"
+    ), ("There is no criterion called " + criterion)
 
+    demos.nonbatch(
+        task=task,
+        criterion=criterion,
+        query_type=query_type,
+        epsilon=epsilon,
+        M=M,
+        outdir=outpath,
+        overwrite=overwrite,
+    )
+
+
+if __name__ == "__main__":
+    fire.Fire(run)
