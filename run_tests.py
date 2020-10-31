@@ -251,12 +251,7 @@ def load(path: Path, overwrite: bool) -> dict:
 
 
 def get_agreement(rewards: np.ndarray, test: np.ndarray) -> np.ndarray:
-    if len(test) > 0:
-        return np.mean(np.dot(rewards, test.T) > 0, axis=1)
-    elif len(rewards) > 0:
-        return np.ones((rewards.shape[0],), dtype=float)
-    else:
-        return None
+    return np.mean(np.dot(rewards, test.T) > 0, axis=1)
 
 
 @arg("--epsilons", nargs="+", type=float)
@@ -265,7 +260,7 @@ def get_agreement(rewards: np.ndarray, test: np.ndarray) -> np.ndarray:
 def human(
     epsilons: List[float] = [0.0],
     deltas: List[float] = [0.05],
-    n_rewards: int = 100,
+    n_rewards: int = 10000,
     human_samples: List[int] = [1],
     n_model_samples: int = 1000,
     normals_name: Path = Path("normals.npy"),

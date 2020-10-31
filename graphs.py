@@ -269,8 +269,9 @@ def fill_na(df):
 
 # %%
 # Human results
-rootdir = Path("human/subject-1")
+rootdir = Path("speed")
 
+#%%
 # Reconstruct agreements from indices output.
 # They agree now, ignore this.
 rewards = np.load(rootdir / "fake_rewards.npy")
@@ -283,7 +284,7 @@ normals = (normals.T * prefs).T
 agreements = pd.DataFrame(columns=["epsilon", "delta", "n", "aligned", "value"])
 j = 0
 
-validation_test = normals[100:].T
+validation_test = normals.T
 for (epsilon, delta, n), i in indices.items():
     test = normals[i]
     aligned = np.all(np.dot(rewards, test.T) > 0, axis=1)
@@ -319,18 +320,38 @@ agreements = agreements.dropna()
 
 #%%
 # Plot agreements
-mean_agreement = (
-    agreements.groupby(["epsilon", "delta", "n", "aligned"]).mean().reset_index()
-)
-plt.hist(mean_agreement[mean_agreement.aligned].value, label="aligned", alpha=0.3)
-plt.hist(
-    mean_agreement[np.logical_not(mean_agreement.aligned)].value,
-    label="unaligned",
-    alpha=0.3,
-)
-plt.xlabel("\% holdout agreement")
+
+epsilon = 0.3
+delta = 0.05
+n = 900
+
+tmp = agreements[
+    np.logical_and(
+        np.logical_and(agreements.epsilon == epsilon, agreements.delta == delta),
+        agreements.n == n,
+    )
+]
+
+tmp[tmp.aligned].value.hist(label="aligned", alpha=0.3)
+
+tmp[tmp.aligned == False].value.hist(label="misaligned", alpha=0.3)
 plt.legend()
 plt.show()
+#%%
+
+# mean_agreement = (
+# agreements.groupby(["epsilon", "delta", "n", "aligned"]).mean().reset_index()
+# )
+# plt.hist(mean_agreement[mean_agreement.aligned].value, label="aligned", alpha=0.3)
+# plt.hist(
+#     mean_agreement[np.logical_not(mean_agreement.aligned)].value,
+#     label="unaligned",
+#     alpha=0.3,
+# )
+
+# plt.xlabel("\% holdout agreement")
+# plt.legend()
+# plt.show()
 
 #%%
 # Graphs when you have ground truth alignment of agents
