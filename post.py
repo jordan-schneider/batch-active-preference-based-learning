@@ -10,108 +10,105 @@ from sampling import Sampler
 from simulation_utils import create_env
 
 
-def sample(
-    reward_dimension: int,
-    a_phis: np.ndarray,
-    b_phis: np.ndarray,
-    preferences: np.ndarray,
-    n_samples: int,
-    query_type: str,
-    delta: float,
-) -> np.ndarray:
-    """ Samples n_samples rewards via MCMC. """
-    w_sampler = Sampler(reward_dimension)
-    for a_phi, b_phi, preference in zip(a_phis, b_phis, preferences):
-        w_sampler.feed(a_phi, b_phi, [preference])
-    rewards, _ = w_sampler.sample_given_delta(n_samples, query_type, delta)
-    return rewards
+class TestFactory:
+    def __init__(
+        self,
+        query_type: str,
+        reward_dimension: int,
+        equiv_probability: Optional[float] = None,
+        deterministic: bool = False,
+        n_reward_samples: Optional[int] = None,
+        skip_remove_duplicates: bool = False,
+        skip_noise_filtering: bool = False,
+        skip_epsilon_filtering: bool = False,
+        skip_redundancy_filtering: bool = False,
+    ) -> None:
+        """Creates a new test factory, filtering test questions.
 
+        Args:
+            query_type (str): "weak" or "strict" for allowing or disallowing equiv preferences.
 
-def remove_duplicates(
-    normals: np.ndarray, precision=0.0001
-) -> Tuple[np.ndarray, np.ndarray]:
-    """ Remove halfspaces that have small cosine similarity to another. """
-    out: List[np.ndarray] = list()
-    indices: List[int] = list()
-    for i, normal in enumerate(normals):
-        for accepted_normal in out:
-            if distance.cosine(normal, accepted_normal) < precision:
-                break
-        out.append(normal)
-        indices.append(i)
-    return np.array(out).reshape(-1, normals.shape[1]), np.array(indices, dtype=int)
+            reward_dimension (int): Dimension of the reward vector.
+            equiv_probability (Optional[float], optional): If weak queries allowed, what is the
+                                                           relative likelihood of sampling an equiv
+                                                           preference. See Sampler for details.
+                                                           Defaults to None.
+            deterministic (bool, optional): Whether to use a determinstic set of rewards for
+                                            debugging. If True, you must provide rewards to the
+                                            filter_halfplanes method. Defaults to False.
+            n_reward_samples (Optional[int], optional): How many rewards to sample when computing 
+                                                        the posterior. Ignored if determinstic is
+                                                        True. Defaults to None.
+            skip_remove_duplicates (bool, optional): Skips the duplicate removal filtering step.
+                                                     Defaults to False.
+            skip_noise_filtering (bool, optional): Skips the noise filtering step. Defaults to False.
+            skip_epsilon_filtering (bool, optional): Skips the epsilon-delta filtering step.
+                                                     Defaults to False.
+            skip_redundancy_filtering (bool, optional): Skips the redundancy filtering step.
+                                                        Defaults to False.
+        """
+        self.query_type = query_type
+        self.n_reward_samples = n_reward_samples
+        self.reward_dimension = reward_dimension
+        self.equiv_probability = equiv_probability
+        self.deterministic = deterministic
+        self.skip_remove_duplicates = skip_remove_duplicates
+        self.skip_noise_filtering = skip_noise_filtering
+        self.skip_epsilon_filtering = skip_epsilon_filtering
+        self.skip_redundancy_filtering = skip_redundancy_filtering
 
+    def sample_rewards(
+        self, a_phis: np.ndarray, b_phis: np.ndarray, preferences: np.ndarray,
+    ) -> np.ndarray:
+        """ Samples n_samples rewards via MCMC. """
+        w_sampler = Sampler(self.reward_dimension)
+        for a_phi, b_phi, preference in zip(a_phis, b_phis, preferences):
+            w_sampler.feed(a_phi, b_phi, [preference])
+        rewards, _ = w_sampler.sample_given_delta(
+            self.n_reward_samples, self.query_type, self.equiv_probability
+        )
+        return rewards
 
-def filter_halfplanes(
-    inputs_features: np.ndarray,
-    normals: np.ndarray,
-    preferences: np.ndarray,
-    query_type: str,
-    equiv_probability: float,
-    noise_threshold: float = 0.7,
-    epsilon: float = 0.0,
-    delta: float = 0.05,
-    n_samples: Optional[int] = None,
-    rewards: Optional[np.ndarray] = None,
-    deterministic: bool = False,
-    skip_remove_duplicates: bool = False,
-    skip_noise_filtering: bool = False,
-    skip_epsilon_filtering: bool = False,
-    skip_redundancy_filtering: bool = False,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """ Filters test questions by removing noise answers, requiring answers have a gap of at
-    least epsilon, and removing redundant questions via linear programming. """
-    a_phis = inputs_features[:, 0]
-    b_phis = inputs_features[:, 1]
-    filtered_normals = normals
-    indices = np.array(range(filtered_normals.shape[0]))
+    @staticmethod
+    def remove_duplicates(
+        normals: np.ndarray, precision=0.0001
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """ Remove halfspaces that have small cosine similarity to another. """
+        out: List[np.ndarray] = list()
+        indices: List[int] = list()
+        for i, normal in enumerate(normals):
+            for accepted_normal in out:
+                if distance.cosine(normal, accepted_normal) < precision:
+                    break
+            out.append(normal)
+            indices.append(i)
+        return np.array(out).reshape(-1, normals.shape[1]), np.array(indices, dtype=int)
 
-    if not skip_remove_duplicates:
-        filtered_normals, indices = remove_duplicates(normals)
-
-        print(f"After removing duplicates, there are {len(indices)} questions.")
-
-    assert np.all(normals[indices] == filtered_normals)
-
-    if not skip_noise_filtering:
-        if rewards is None:
-            if deterministic:
-                raise ValueError("Must provide rewards to use deterministic mode.")
-            if n_samples is None:
-                raise ValueError("Must provide n_samples if reward is not provided")
-
-            rewards = sample(
-                reward_dimension=create_env("driver").num_of_features,
-                n_samples=n_samples,
-                a_phis=a_phis,
-                b_phis=b_phis,
-                preferences=preferences,
-                query_type=query_type,
-                delta=equiv_probability,
-            )
-
+    @staticmethod
+    def filter_noise(
+        normals: np.ndarray,
+        filtered_normals: np.ndarray,
+        indices: np.ndarray,
+        rewards: np.ndarray,
+        noise_threshold: float,
+    ):
         filtered_indices = (
             np.mean(np.dot(rewards, filtered_normals.T) > 0, axis=0) > noise_threshold
         )
         indices = indices[filtered_indices]
         assert all([row in filtered_normals for row in normals[indices]])
         filtered_normals = normals[indices].reshape(-1, normals.shape[1])
+        return filtered_normals, indices
 
-        print(f"After noise filtering there are {len(indices)} questions.")
-
-    if not skip_epsilon_filtering and filtered_normals.shape[0] > 0:
-        if not deterministic and n_samples is not None:
-            # This reward generation logic is jank.
-            rewards = sample(
-                reward_dimension=create_env("driver").num_of_features,
-                n_samples=n_samples,
-                a_phis=a_phis,
-                b_phis=b_phis,
-                preferences=preferences,
-                query_type=query_type,
-                delta=equiv_probability,
-            )
-
+    @staticmethod
+    def margin_filter(
+        normals: np.ndarray,
+        filtered_normals: np.ndarray,
+        indices: np.ndarray,
+        rewards: np.ndarray,
+        epsilon: float,
+        delta: float,
+    ):
         opinions = np.dot(rewards, filtered_normals.T).T
         correct_opinions = opinions > epsilon
 
@@ -121,18 +118,72 @@ def filter_halfplanes(
         assert all([row in filtered_normals for row in normals[indices]])
         filtered_normals = normals[indices].reshape(-1, normals.shape[1])
 
-        print(f"After epsilon delta filtering there are {len(indices)} questions.")
+        return filtered_normals, indices
 
-    if not skip_redundancy_filtering and filtered_normals.shape[0] > 0:
-        # Remove redundant halfspaces
-        filtered_normals, constraint_indices = remove_redundant_constraints(
-            filtered_normals
-        )
+    def filter_halfplanes(
+        self,
+        inputs_features: np.ndarray,
+        normals: np.ndarray,
+        preferences: np.ndarray,
+        noise_threshold: float = 0.7,
+        epsilon: float = 0.0,
+        delta: float = 0.05,
+        rewards: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """ Filters test questions by removing noise answers, requiring answers have a gap of at
+        least epsilon, and removing redundant questions via linear programming. """
+        a_phis = inputs_features[:, 0]
+        b_phis = inputs_features[:, 1]
+        filtered_normals = normals
+        indices = np.array(range(filtered_normals.shape[0]))
 
-        constraint_indices = np.array(constraint_indices, dtype=np.int)
-        indices = indices[constraint_indices]
+        if not self.skip_remove_duplicates:
+            filtered_normals, indices = self.remove_duplicates(normals)
+
+            print(f"After removing duplicates, there are {len(indices)} questions.")
+
         assert np.all(normals[indices] == filtered_normals)
 
-        print(f"After removing redundancies there are {len(indices)} questions.")
+        if not self.skip_noise_filtering:
+            if rewards is None:
+                if self.deterministic:
+                    raise ValueError("Must provide rewards to use deterministic mode.")
+                if self.n_reward_samples is None:
+                    raise ValueError(
+                        "Must provide n_reward_samples if reward is not provided"
+                    )
 
-    return filtered_normals, indices
+                rewards = self.sample_rewards(
+                    a_phis=a_phis, b_phis=b_phis, preferences=preferences
+                )
+
+            filtered_normals, indices = self.filter_noise(
+                normals, filtered_normals, indices, rewards, noise_threshold
+            )
+
+            print(f"After noise filtering there are {len(indices)} questions.")
+
+        if not self.skip_epsilon_filtering and filtered_normals.shape[0] > 0:
+            if not self.deterministic and self.n_reward_samples is not None:
+                # This reward generation logic is jank.
+                rewards = self.sample_rewards(
+                    a_phis=a_phis, b_phis=b_phis, preferences=preferences,
+                )
+            filtered_normals, indices = self.margin_filter(
+                normals, filtered_normals, indices, rewards, epsilon, delta
+            )
+            print(f"After epsilon delta filtering there are {len(indices)} questions.")
+
+        if not self.skip_redundancy_filtering and filtered_normals.shape[0] > 0:
+            # Remove redundant halfspaces
+            filtered_normals, constraint_indices = remove_redundant_constraints(
+                filtered_normals
+            )
+
+            constraint_indices = np.array(constraint_indices, dtype=np.int)
+            indices = indices[constraint_indices]
+            assert np.all(normals[indices] == filtered_normals)
+
+            print(f"After removing redundancies there are {len(indices)} questions.")
+
+        return filtered_normals, indices

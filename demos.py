@@ -54,15 +54,14 @@ def nonbatch(
     query_type: str,
     epsilon: float,
     M: int,
+    delta: float,
     outdir: Path = Path("questions"),
     overwrite: bool = False,
 ):
-
     simulation_object = create_env(task)
     d = simulation_object.num_of_features
     # make this None if you will also learn delta, and change the samplers below
     # from sample_given_delta to sample (and of course remove the true_delta argument)
-    true_delta = 1
     pickle.dump(
         {
             "task": task,
@@ -70,7 +69,7 @@ def nonbatch(
             "query_type": query_type,
             "epsilon": epsilon,
             "M": M,
-            "delta": true_delta,
+            "delta": delta,
         },
         open(outdir / "flags.pkl", "wb"),
     )
@@ -92,7 +91,7 @@ def nonbatch(
     try:
         while score >= epsilon:
             w_samples, delta_samples = w_sampler.sample_given_delta(
-                M, query_type, true_delta
+                M, query_type, delta
             )
 
             input_A, input_B, score = run_algo(
@@ -118,5 +117,5 @@ def nonbatch(
         # Pass through to finally
         print("\nSaving results, please do not exit again.")
     finally:
-        save_reward(query_type, true_delta, w_sampler, M, outdir)
+        save_reward(query_type, delta, w_sampler, M, outdir)
 
