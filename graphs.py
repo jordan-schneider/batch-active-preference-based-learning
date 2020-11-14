@@ -1,45 +1,173 @@
-#%%
 import pickle
 import sys
 from itertools import islice
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd  # type: ignore
 import seaborn as sns  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
 
-#%%
-plt.rc("text", usetex=True)
-plt.rcParams.update({"font.size": 33})
-
-interactive = getattr(sys, "ps1", None) is not None
+from run_tests import Experiment
 
 
-def closefig():
-    if interactive:
+def get_interactive():
+    """ Cursed magic for determining if the code is being run in an interactive environment. """
+    return getattr(sys, "ps1", None) is not None
+
+
+def closefig(out: Optional[Path] = None):
+    if get_interactive() and out is None:
         plt.show()
     else:
+        if out is not None:
+            plt.savefig(out)
         plt.close()
 
 
-result = pickle.load(open(Path("human/subject-1/confusion.pkl"), "rb"))
-ns = set()
-deltas = set()
-for _, delta, n in result.keys():
-    ns.add(n)
-    deltas.add(delta)
+def make_xaxis():
+    # TODO(joschnei): In theory I should be able to specify n_ticks, n_labels, lower, upper and do
+    # the math, but it's not worth it.
+    xticks = np.linspace(0, 1.5, 16)
+    xlabels = [0.0, "", "", "", "", 0.5, "", "", "", "", 1.0, "", "", "", "", 1.5]
+    return xticks, xlabels
 
-palette = sns.color_palette("muted", max(len(ns), len(deltas)))
 
-ns_palette_map = {str(n): palette[i] for i, n in enumerate(sorted(ns))}
-deltas_pallete_map = {delta: palette[i] for i, delta in enumerate(sorted(deltas))}
+def make_palette_maps(experiments: Sequence[Experiment]):
+    """ Given a sequence of experimental parameters, generate palette maps for representing
+    parameter values. """
+    ns = set()
+    deltas = set()
+    for _, delta, n in experiments:
+        ns.add(n)
+        deltas.add(delta)
 
-n_replications = 10
+    palette = sns.color_palette("muted", max(len(ns), len(deltas)))
 
-xticks = np.linspace(0, 1.5, 16)
-xlabels = [0.0, "", "", "", "", 0.5, "", "", "", "", 1.0, "", "", "", "", 1.5]
+    ns_palette_map = {str(n): palette[i] for i, n in enumerate(sorted(ns))}
+    deltas_palette_map = {delta: palette[i] for i, delta in enumerate(sorted(deltas))}
+    return ns_palette_map, deltas_palette_map
+
+
+def get_hue(hue: str, df):
+    ns_palette_map, deltas_palette_map = make_palette_maps(df.keys().unique())
+    if hue == "n":
+        palette = ns_palette_map
+        hue_order = df.ns.unique()
+    elif hue == "delta":
+        palette = deltas_palette_map
+        hue_order = df.delta.unique()
+    else:
+        raise ValueError("Hue must be n or delta")
+
+    return palette, hue_order
+
+
+# HUMAN EXPERIMENTS
+
+
+def check(
+    normals: np.ndarray,
+    indices: np.ndarray,
+    rewards: np.ndarray,
+    saved_agreements: Dict[Experiment, np.ndarray],
+):
+    """Reconstruct alignment decisions and check that they agree with cached values."""
+    j = 0
+    agreements = pd.DataFrame(columns=["epsilon", "delta", "n", "aligned", "value"])
+    validation_test = normals.T
+    for (epsilon, delta, n), i in indices.items():
+        test = normals[i]
+        aligned = np.all(np.dot(rewards, test.T) > 0, axis=1)
+
+        aligned_rewards = rewards[aligned]
+        misaligned_rewards = rewards[np.logical_not(aligned)]
+
+        for agreement in np.mean(np.dot(aligned_rewards, validation_test) > 0, axis=1):
+            agreements.loc[j] = [epsilon, delta, n, True, agreement]
+            j += 1
+
+        for agreement in np.mean(
+            np.dot(misaligned_rewards, validation_test) > 0, axis=1
+        ):
+            agreements.loc[j] = [epsilon, delta, n, False, agreement]
+            j += 1
+
+    assert agreements.keys() == saved_agreements.keys()
+    for key in agreements.keys():
+        assert np.all(agreements[key] == saved_agreements[key])
+
+
+def make_agreements(file) -> pd.DataFrame:
+    """ In some of the human conditions, we hold out questions. Each randomly generated agent is
+    given our test and then asked it's opinion on every hold out question.
+    
+    agreements.pkl is a Dict[Experiment, Tuple(ndarray, ndarray)] where each array element
+    contains the fraction of holdout questions a single agent answered correctly. The first array
+    contains agents that passed our test, and the second contains agents that didn't pass our test.
+
+    This method massages that data into a DataFrame with experiments as they keys, a column
+    for predicted alignment, and a column for the fraction of holdout questions answered correctly.
+    """
+    agreements = pd.Series(pickle.load(file)).reset_index()
+    agreements = agreements.join(
+        agreements.apply(lambda x: list(x[0]), result_type="expand", axis="columns"),
+        rsuffix="_",
+    )
+    del agreements["0"]
+    agreements.columns = ["epsilon", "delta", "n", "aligned", "misaligned"]
+    agreements = agreements.set_index(["epsilon", "delta", "n"]).stack().reset_index()
+    agreements.columns = ["epsilon", "delta", "n", "aligned", "value"]
+    agreements = agreements.explode("value")
+    agreements["aligned"] = agreements.aligned == "aligned"
+
+    agreements.value = agreements.value.apply(lambda x: float(x))
+    agreements = agreements.dropna()
+    return agreements
+
+
+def plot_agreements(
+    agreements: pd.DataFrame,
+    epsilon: float,
+    delta: float,
+    n: int,
+    out: Optional[Path] = None,
+) -> None:
+    """ Plots histograms of how many agents had different amounts of holdout agreement for agents
+    prediced tobe aligned and misaligned."""
+    tmp = agreements[
+        np.logical_and(
+            np.logical_and(agreements.epsilon == epsilon, agreements.delta == delta),
+            agreements.n == n,
+        )
+    ]
+
+    tmp[tmp.aligned].value.hist(label="aligned", alpha=0.3)
+    tmp[tmp.aligned == False].value.hist(label="misaligned", alpha=0.3)
+
+    plt.xlabel("Hold out agreement")
+    plt.legend()
+    closefig(out)
+
+
+def plot_mean_agreement(agreements: pd.DataFrame, out: Optional[Path] = None) -> None:
+    mean_agreement = (
+        agreements.groupby(["epsilon", "delta", "n", "aligned"]).mean().reset_index()
+    )
+    plt.hist(mean_agreement[mean_agreement.aligned].value, label="aligned", alpha=0.3)
+    plt.hist(
+        mean_agreement[np.logical_not(mean_agreement.aligned)].value,
+        label="unaligned",
+        alpha=0.3,
+    )
+
+    plt.xlabel("\% holdout agreement")
+    plt.legend()
+    closefig(out)
+
+
+# SIMULATIONS
 
 
 def read_confusion(dir: Path, ablation: str = ""):
@@ -65,7 +193,7 @@ def read_confusion(dir: Path, ablation: str = ""):
     return out
 
 
-def get_df(rootdir: Path, ablation: str, replications: Optional[int] = None):
+def read_replications(rootdir: Path, ablation: str, replications: Optional[int] = None):
     df = pd.DataFrame(columns=["epsilon", "n", "tn", "fp", "tp"])
     if replications is not None:
         for replication in range(1, replications + 1):
@@ -90,14 +218,15 @@ def plot_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
 
     plt.figure(figsize=(10, 10))
 
-    pallete, hue_order = get_hue(hue, df)
+    palette, hue_order = get_hue(hue, df)
+    xticks, xlabels = make_xaxis()
 
     g = sns.relplot(
         x="epsilon",
         y="fpr",
         hue=hue,
         kind="line",
-        palette=pallete,
+        palette=palette,
         data=df,
         ci=80,
         hue_order=hue_order,
@@ -110,9 +239,9 @@ def plot_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
     plt.xlabel(r"$\epsilon$")
     plt.ylabel("False Postive Rate")
     plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
-    # plt.xticks(
-    #     ticks=xticks, labels=xlabels,
-    # )
+    plt.xticks(
+        ticks=xticks, labels=xlabels,
+    )
     plt.ylim((0, 1.01))
     plt.savefig(rootdir / ("fpr" + ablation + ".png"))
     closefig()
@@ -122,14 +251,15 @@ def plot_fnr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
 
     plt.figure(figsize=(10, 10))
 
-    pallete, hue_order = get_hue(hue, df)
+    palette, hue_order = get_hue(hue, df)
+    xticks, xlabels = make_xaxis()
 
     g = sns.relplot(
         x="epsilon",
         y="fnr",
         hue=hue,
         kind="line",
-        palette=pallete,
+        palette=palette,
         data=df,
         ci=80,
         hue_order=hue_order,
@@ -142,31 +272,28 @@ def plot_fnr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
     plt.xlabel(r"$\epsilon$")
     plt.ylabel("False Negative Rate")
     plt.title(r"$\epsilon$-Relaxation's Effect on FNR")
-    # plt.xticks(
-    #     ticks=xticks, labels=xlabels,
-    # )
+    plt.xticks(
+        ticks=xticks, labels=xlabels,
+    )
     plt.ylim((0, 1.01))
     plt.savefig(rootdir / ("fnr" + ablation + ".png"))
     closefig()
 
 
-def get_hue(hue: str, df):
-    if hue == "n":
-        pallete = ns_palette_map
-        hue_order = df.ns.unique()
-    elif hue == "delta":
-        pallete = deltas_pallete_map
-        hue_order = df.delta.unique()
-    else:
-        raise ValueError("Hue must be n or delta")
-
-    return pallete, hue_order
+def get_rows_per_replication(df: pd.DataFrame) -> int:
+    return df.epsilon.unique().size * df.n.unique().size * df.delta.unique().size
 
 
-def plot_individual_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
-
-    pallete, hue_order = get_hue(hue, df)
-
+def plot_individual_fpr(
+    df: pd.DataFrame,
+    rootdir: Path,
+    ablation: str,
+    hue: str = "n",
+    n_replications: int = 10,
+):
+    palette, hue_order = get_hue(hue, df)
+    xticks, xlabels = make_xaxis()
+    rows_per_replication = get_rows_per_replication(df)
     for i in range(1, n_replications + 1):
 
         g = sns.relplot(
@@ -174,7 +301,7 @@ def plot_individual_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str
             y="fpr",
             hue=hue,
             kind="line",
-            palette=pallete,
+            palette=palette,
             data=df[rows_per_replication * (i - 1) : rows_per_replication * i],
             hue_order=hue_order,
             legend="brief",
@@ -184,15 +311,16 @@ def plot_individual_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str
         plt.xlabel(r"$\epsilon$")
         plt.ylabel("False Positive Rate")
         plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
-        # plt.xticks(
-        #     ticks=xticks, labels=xlabels,
-        # )
+        plt.xticks(
+            ticks=xticks, labels=xlabels,
+        )
         plt.ylim((0, 1.01))
         plt.savefig(rootdir / str(i) / ("fpr" + ablation + ".png"))
         closefig()
 
 
 def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n):
+    xticks, xlabels = make_xaxis()
     df = df[df.n == n]
     plt.figure(figsize=(10, 10))
 
@@ -203,21 +331,22 @@ def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n):
     plt.xlabel(r"$\epsilon$")
     plt.ylabel("False Postive Rate")
     plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
-    # plt.xticks(
-    #     ticks=xticks, labels=xlabels,
-    # )
+    plt.xticks(
+        ticks=xticks, labels=xlabels,
+    )
     plt.savefig(rootdir / ("fpr.largest" + ablation + ".png"))
     closefig()
 
 
 def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
-    pallete, hue_order = get_hue(hue, df)
+    palette, hue_order = get_hue(hue, df)
+    xticks, xlabels = make_xaxis()
     g = sns.relplot(
         x="epsilon",
         y="tpf",
         hue=hue,
         kind="line",
-        palette=pallete,
+        palette=palette,
         data=df,
         ci=80,
         hue_order=hue_order,
@@ -228,15 +357,23 @@ def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
     plt.xlabel(r"$\epsilon$")
     plt.ylabel("\% True Positives")
     plt.title(r"$\epsilon$-Relaxation's Effect on TP \%")
-    # plt.xticks(
-    #     ticks=xticks, labels=xlabels,
-    # )
+    plt.xticks(
+        ticks=xticks, labels=xlabels,
+    )
     plt.ylim((0, 1.01))
     plt.savefig(rootdir / ("tp" + ablation + ".png"))
 
 
-def plot_individual_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
-    pallete, hue_order = get_hue(hue, df)
+def plot_individual_tp(
+    df: pd.DataFrame,
+    rootdir: Path,
+    ablation: str,
+    hue: str = "n",
+    n_replications: int = 10,
+):
+    palette, hue_order = get_hue(hue, df)
+    xticks, xlabels = make_xaxis()
+    rows_per_replication = get_rows_per_replication(df)
     for i in range(1, n_replications + 1):
         g = sns.relplot(
             x="epsilon",
@@ -254,9 +391,9 @@ def plot_individual_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str 
         plt.xlabel(r"$\epsilon$")
         plt.ylabel("\% True Positives")
         plt.title(r"$\epsilon$-Relaxation's Effect on TP \%")
-        # plt.xticks(
-        #     ticks=xticks, labels=xlabels,
-        # )
+        plt.xticks(
+            ticks=xticks, labels=xlabels,
+        )
         plt.ylim((0, 1.01))
         plt.savefig(rootdir / str(i) / ("tp" + ablation + ".png"))
         closefig()
@@ -267,155 +404,39 @@ def fill_na(df):
     df.fnr.fillna(0.0, inplace=True)
 
 
-# %%
-# Human results
-rootdir = Path("speed")
+def plot_no_noise(rootdir: Path = Path("questions"), n_replications: int = 10):
+    skip_noise = read_replications(rootdir, ".skip_noise")
 
-#%%
-# Reconstruct agreements from indices output.
-# They agree now, ignore this.
-rewards = np.load(rootdir / "fake_rewards.npy")
-normals = np.load(rootdir / "normals.npy")
-prefs = np.load(rootdir / "preferences.npy")
-indices = pickle.load(open(rootdir / "indices.pkl", "rb"))
+    plot_fpr(skip_noise, rootdir, ".skip_noise")
+    plot_fnr(skip_noise, rootdir, ".skip_noise")
+    plot_largest_fpr(skip_noise, rootdir, ".skip_noise", n="1000")
+    plot_individual_fpr(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
 
-normals = (normals.T * prefs).T
-
-agreements = pd.DataFrame(columns=["epsilon", "delta", "n", "aligned", "value"])
-j = 0
-
-validation_test = normals.T
-for (epsilon, delta, n), i in indices.items():
-    test = normals[i]
-    aligned = np.all(np.dot(rewards, test.T) > 0, axis=1)
-
-    aligned_rewards = rewards[aligned]
-    misaligned_rewards = rewards[np.logical_not(aligned)]
-
-    for agreement in np.mean(np.dot(aligned_rewards, validation_test) > 0, axis=1):
-        agreements.loc[j] = [epsilon, delta, n, True, agreement]
-        j += 1
-
-    for agreement in np.mean(np.dot(misaligned_rewards, validation_test) > 0, axis=1):
-        agreements.loc[j] = [epsilon, delta, n, False, agreement]
-        j += 1
-
-#%%
-# Load from agreements.pkl
-agreements = pd.Series(pickle.load(open(rootdir / "agreement.pkl", "rb"))).reset_index()
-agreements = agreements.join(
-    agreements.apply(lambda x: list(x[0]), result_type="expand", axis="columns"),
-    rsuffix="_",
-)
-del agreements["0"]
-agreements.columns = ["epsilon", "delta", "n", "aligned", "misaligned"]
-agreements = agreements.set_index(["epsilon", "delta", "n"]).stack().reset_index()
-agreements.columns = ["epsilon", "delta", "n", "aligned", "value"]
-agreements = agreements.explode("value")
-agreements["aligned"] = agreements.aligned == "aligned"
-
-agreements.value = agreements.value.apply(lambda x: float(x))
-agreements = agreements.dropna()
+    plot_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
+    plot_individual_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
 
 
-#%%
-# Plot agreements
-
-epsilon = 0.3
-delta = 0.05
-n = 900
-
-tmp = agreements[
-    np.logical_and(
-        np.logical_and(agreements.epsilon == epsilon, agreements.delta == delta),
-        agreements.n == n,
+def plot_noise(rootdir: Path = Path("noisy-questions"), n_replications: int = 10):
+    noise_without_filtering = read_replications(
+        rootdir=rootdir, ablation=".skip_noise", replications=n_replications
     )
-]
+    fill_na(noise_without_filtering)
 
-tmp[tmp.aligned].value.hist(label="aligned", alpha=0.3)
-
-tmp[tmp.aligned == False].value.hist(label="misaligned", alpha=0.3)
-plt.legend()
-plt.show()
-#%%
-
-# mean_agreement = (
-# agreements.groupby(["epsilon", "delta", "n", "aligned"]).mean().reset_index()
-# )
-# plt.hist(mean_agreement[mean_agreement.aligned].value, label="aligned", alpha=0.3)
-# plt.hist(
-#     mean_agreement[np.logical_not(mean_agreement.aligned)].value,
-#     label="unaligned",
-#     alpha=0.3,
-# )
-
-# plt.xlabel("\% holdout agreement")
-# plt.legend()
-# plt.show()
-
-#%%
-# Graphs when you have ground truth alignment of agents
-# human = get_df(rootdir=rootdir, ablation="")
-# fill_na(human)
-
-# strict_indices = (human.tp + human.tn) != 0
-
-# strict_indices = strict_indices.index[strict_indices]
-# start_index = max(strict_indices[0] - 1, 0)
-# empty_indices = (human.tn + human.fn) == 0
-# empty_indices = empty_indices.index[empty_indices]
-# stop_index = min(empty_indices[0], len(human) - 1)
-
-# human = human.iloc[start_index:stop_index]
-
-# plot_fpr(df=human, rootdir=rootdir, ablation="", hue="delta")
-# plot_fnr(df=human, rootdir=rootdir, ablation="", hue="delta")
-# plot_tp(df=human, rootdir=rootdir, ablation="", hue="delta")
-
-#%%
-
-rootdir = Path("questions")
-
-skip_noise = get_df(rootdir, ".skip_noise", replications=n_replications)
-# skip_lp = get_df(rootdir, ".skip_noise.skip_lp", replications=n_replications)
-
-rows_per_replication = skip_noise.epsilon.unique().size * skip_noise.n.unique().size
-# first_experiment = skip_noise.iloc[:rows_per_replication]
-
-# %%
-plot_fpr(skip_noise, rootdir, ".skip_noise")
-plot_fnr(skip_noise, rootdir, ".skip_noise")
-plot_largest_fpr(skip_noise, rootdir, ".skip_noise", n="1000")
-plot_individual_fpr(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
-
-plot_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
-plot_individual_tp(df=skip_noise, rootdir=rootdir, ablation=".skip_noise")
-
-#%%
-###################
-# Simulated Noise #
-###################
-
-rootdir = Path("noisy-questions")
-
-noise_with_filtering = get_df(rootdir=rootdir, ablation="", replications=n_replications)
-fill_na(noise_with_filtering)
-
-noise_without_filtering = get_df(
-    rootdir=rootdir, ablation=".skip_noise", replications=n_replications
-)
-fill_na(noise_without_filtering)
-#%%
-plot_fpr(df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise")
-plot_fnr(df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise")
-plot_largest_fpr(
-    df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise", n="1000"
-)
+    plot_fpr(df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise")
+    plot_fnr(df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise")
+    plot_largest_fpr(
+        df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise", n="1000"
+    )
 
 
-plot_fpr(df=noise_with_filtering, rootdir=rootdir, ablation="")
-plot_fnr(df=noise_with_filtering, rootdir=rootdir, ablation="")
-plot_largest_fpr(df=noise_with_filtering, rootdir=rootdir, ablation="", n="1000")
+if __name__ == "__main__":
+    plt.rc("text", usetex=True)
+    plt.rcParams.update({"font.size": 33})
 
+    agreements = make_agreements(open(Path("questions/agreement.skip_noise.pkl"), "rb"))
 
-# %%
+    plot_mean_agreement(agreements, out=Path("questions/mean_agreement.skip_noise.png"))
+    plot_agreements(
+        agreements, 0.1, 0.3, 60, out=Path("questions/agreement.skip_noise.png")
+    )
+
