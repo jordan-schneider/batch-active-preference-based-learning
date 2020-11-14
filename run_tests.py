@@ -76,11 +76,11 @@ def find_reward_boundary(
 
 
 def run_test(
-    normals: np.ndarray, fake_rewards: np.ndarray, use_equiv: bool
+    normals: np.ndarray, test_rewards: np.ndarray, use_equiv: bool
 ) -> np.ndarray:
     """ Returns the predicted alignment of the fake rewards by the normals. """
     assert_normals(normals, use_equiv)
-    results = np.all(np.dot(fake_rewards, normals.T) > 0, axis=1)
+    results = np.all(np.dot(test_rewards, normals.T) > 0, axis=1)
     return results
 
 
@@ -332,7 +332,7 @@ Experiment = Tuple[float, float, int]
 
 
 def run_experiment(
-    fake_rewards: np.ndarray,
+    test_rewards: np.ndarray,
     normals: np.ndarray,
     input_features: np.ndarray,
     preferences: np.ndarray,
@@ -341,7 +341,9 @@ def run_experiment(
     n_human_samples: int,
     factory: TestFactory,
     use_equiv: bool,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Experiment]:
+) -> Tuple[np.ndarray, np.ndarray, Experiment]:
+    if n_human_samples == -1:
+        n_human_samples == normals.shape[0]
     filtered_normals = normals[:n_human_samples]
     filtered_normals, indices = factory.filter_halfplanes(
         inputs_features=input_features,
@@ -353,17 +355,9 @@ def run_experiment(
 
     experiment = (epsilon, delta, n_human_samples)
 
-    results = run_test(filtered_normals, fake_rewards, use_equiv)
+    results = run_test(filtered_normals, test_rewards, use_equiv)
 
-    pred_aligned = fake_rewards[results]
-    pred_misaligned = fake_rewards[np.logical_not(results)]
-
-    aligned_agreement = get_agreement(pred_aligned, normals[n_human_samples:])
-    misaligned_agreement = get_agreement(pred_misaligned, normals[n_human_samples:])
-
-    agreement = (aligned_agreement, misaligned_agreement)
-
-    return indices, results, agreement, experiment
+    return indices, results, experiment
 
 
 def make_experiments(
@@ -397,6 +391,7 @@ def human(
     preferences_name: Path = Path("preferences.npy"),
     flags_name: Path = Path("flags.pkl"),
     datadir: Path = Path("questions"),
+    rewards_path: Optional[Path] = None,
     use_equiv: bool = False,
     skip_remove_duplicates: bool = False,
     skip_noise_filtering: bool = False,
@@ -448,23 +443,17 @@ def human(
         skip_redundancy_filtering,
         base="test_results",
     )
-    agreement_path = datadir / make_outname(
-        skip_remove_duplicates,
-        skip_noise_filtering,
-        skip_epsilon_filtering,
-        skip_redundancy_filtering,
-        base="agreement",
-    )
 
     minimal_tests: Dict[Experiment, np.ndarray]
     minimal_tests = load(test_path, overwrite)
     results: Dict[Experiment, np.ndarray]
     results = load(test_results_path, overwrite)
-    agreements: Dict[Experiment, Tuple[np.ndarray, np.ndarray]]
-    agreements = load(agreement_path, overwrite)
 
-    fake_rewards = make_rewards(n_rewards, use_equiv)
-    np.save(datadir / "fake_rewards.npy", fake_rewards)
+    if rewards_path is None:
+        test_rewards = make_rewards(n_rewards, use_equiv)
+    else:
+        test_rewards = np.load(open(datadir / rewards_path, "rb"))
+    np.save(datadir / "test_rewards.npy", test_rewards)
 
     experiments = make_experiments(
         epsilons,
@@ -474,9 +463,9 @@ def human(
         experiments=set(minimal_tests.keys()),
     )
 
-    for indices, result, agreement, experiment in Parallel(n_jobs=-2)(
+    for indices, result, experiment in Parallel(n_jobs=-2)(
         delayed(run_experiment)(
-            fake_rewards,
+            test_rewards,
             normals,
             input_features,
             preferences,
@@ -490,11 +479,9 @@ def human(
     ):
         minimal_tests[experiment] = indices
         results[experiment] = result
-        agreements[experiment] = agreement
 
     pickle.dump(minimal_tests, open(test_path, "wb"))
     pickle.dump(results, open(test_results_path, "wb"))
-    pickle.dump(agreements, open(agreement_path, "wb"))
 
 
 if __name__ == "__main__":

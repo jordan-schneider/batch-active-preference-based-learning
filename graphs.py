@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd  # type: ignore
 import seaborn as sns  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
+from sklearn.metrics import confusion_matrix  # type: ignore
 
 from run_tests import Experiment
 
@@ -51,13 +52,15 @@ def make_palette_maps(experiments: Sequence[Experiment]):
 
 
 def get_hue(hue: str, df):
-    ns_palette_map, deltas_palette_map = make_palette_maps(df.keys().unique())
+    ns_palette_map, deltas_palette_map = make_palette_maps(
+        df.loc[:, ["epsilon", "delta", "n"]].drop_duplicates().to_numpy()
+    )
     if hue == "n":
         palette = ns_palette_map
-        hue_order = df.ns.unique()
+        hue_order = df["n"].unique()
     elif hue == "delta":
         palette = deltas_palette_map
-        hue_order = df.delta.unique()
+        hue_order = df["delta"].unique()
     else:
         raise ValueError("Hue must be n or delta")
 
@@ -165,6 +168,54 @@ def plot_mean_agreement(agreements: pd.DataFrame, out: Optional[Path] = None) ->
     plt.xlabel("\% holdout agreement")
     plt.legend()
     closefig(out)
+
+
+def make_human_confusion(
+    label_path: Path = Path("questions/gt_rewards/aligment.npy"),
+    prediction_path: Path = Path("questions/test_results.skip_noise.pkl"),
+) -> pd.DataFrame:
+    label = np.load(label_path)
+    predictions: Dict[Experiment, np.ndarray] = pickle.load(open(prediction_path, "rb"))
+
+    confusions = []
+    for experiment, prediction in predictions.items():
+        epsilon, delta, n = experiment
+        if n <= 0:
+            continue
+        confusion = confusion_matrix(
+            y_true=label, y_pred=prediction, labels=[False, True]
+        )
+        confusions.append(
+            (
+                *experiment,
+                confusion[0][0],
+                confusion[0][1],
+                confusion[1][0],
+                confusion[1][1],
+            )
+        )
+
+    df = pd.DataFrame(
+        confusions, columns=["epsilon", "delta", "n", "tn", "fp", "fn", "tp"],
+    )
+
+    # idx = pd.MultiIndex.from_tuples(
+    #     confusion_dict.keys(), names=["epsilon", "delta", "n"]
+    # )
+
+    # df = pd.Series(confusion_dict.values(), index=idx).unstack(-1)
+    # df.columns = ["tp", "fp", "fn", "tn"]
+
+    # TODO(joschnei): Factor common confusion stuff out.
+    df = df.convert_dtypes()
+
+    # Seaborn tries to convert integer hues into rgb values. So we make them strings.
+    df["n"] = df["n"].astype(str)
+    df["fpr"] = df.fp / (df.fp + df.tn)
+    df["tpf"] = df.tp / (df.tp + df.fp + df.tn)
+    df["fnr"] = df.fn / (df.fn + df.tp)
+
+    return df
 
 
 # SIMULATIONS
@@ -433,10 +484,9 @@ if __name__ == "__main__":
     plt.rc("text", usetex=True)
     plt.rcParams.update({"font.size": 33})
 
-    agreements = make_agreements(open(Path("questions/agreement.skip_noise.pkl"), "rb"))
+    rootdir = Path("questions")
+    ablation = ".skip_noise"
 
-    plot_mean_agreement(agreements, out=Path("questions/mean_agreement.skip_noise.png"))
-    plot_agreements(
-        agreements, 0.1, 0.3, 60, out=Path("questions/agreement.skip_noise.png")
-    )
-
+    confusion = make_human_confusion()
+    plot_fpr(confusion, rootdir, ablation, hue="n")
+    plot_fnr(confusion, rootdir, ablation, hue="n")
