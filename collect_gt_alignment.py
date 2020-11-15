@@ -23,8 +23,8 @@ def make_path(reward: np.ndarray) -> np.ndarray:
 
 def collect(
     outdir: Path,
+    n_rewards: int,
     test_reward_path: Optional[Path] = None,
-    n_rewards: Optional[int] = None,
     std: Optional[float] = None,
     mean_reward_path: Optional[Path] = None,
     overwrite: bool = False,
@@ -32,7 +32,7 @@ def collect(
     outdir = Path(outdir)
 
     if test_reward_path is not None:
-        rewards = np.load(outdir / test_reward_path)
+        rewards = np.load(test_reward_path)
     elif mean_reward_path is not None and n_rewards is not None and std is not None:
         mean_reward = np.load(mean_reward_path)
         rewards = default_rng().normal(
