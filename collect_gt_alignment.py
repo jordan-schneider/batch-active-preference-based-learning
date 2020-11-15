@@ -1,50 +1,65 @@
 from functools import partial
+from itertools import islice
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import fire  # type: ignore
 import numpy as np
 from joblib import Parallel, delayed  # type: ignore
 from numpy.random import default_rng
+from scipy import optimize
 
 from demos import append, load
 from simulation_utils import compute_best, create_env
 
 
-def make_paths(mean_reward: np.ndarray, variance: float):
-    reward = default_rng().normal(loc=mean_reward, scale=variance)
-    reward = reward / np.linalg.norm(reward)
-
+def make_path(reward: np.ndarray) -> np.ndarray:
     simulation_object = create_env("driver")
     optimal_ctrl = compute_best(
         simulation_object=simulation_object, w=reward, iter_count=10
     )
-    return reward, optimal_ctrl
+    return optimal_ctrl
 
 
 def collect(
-    n_rewards: int,
-    variance: float,
-    reward_path: Path,
     outdir: Path,
+    test_reward_path: Optional[Path] = None,
+    n_rewards: Optional[int] = None,
+    std: Optional[float] = None,
+    mean_reward_path: Optional[Path] = None,
     overwrite: bool = False,
 ) -> None:
     outdir = Path(outdir)
-    mean_reward = np.load(open(reward_path, "rb"))
 
-    rewards = load(outdir, "test_rewards.npy", overwrite=overwrite)
+    if test_reward_path is not None:
+        rewards = np.load(outdir / test_reward_path)
+    elif mean_reward_path is not None and n_rewards is not None and std is not None:
+        mean_reward = np.load(mean_reward_path)
+        rewards = default_rng().normal(
+            loc=mean_reward, scale=std, shape=(n_rewards, *mean_reward.shape)
+        )
+    else:
+        raise ValueError(
+            "You must either supply a path to the test rewards, or a mean reward and "
+            "std from which to sample the test rewards."
+        )
+
+    out_rewards = load(outdir, "test_rewards.npy", overwrite=overwrite)
+    out_rewards = append(out_rewards, rewards)
+
     paths = load(outdir, "optimal_paths.npy", overwrite=overwrite)
     gt_alignment = load(outdir, "aligment.npy", overwrite=overwrite)
 
-    for reward, optimal_ctrl in Parallel(n_jobs=-2)(
-        delayed(partial(make_paths, mean_reward=mean_reward, variance=variance))()
-        for _ in range(n_rewards)
-    ):
-        rewards = append(rewards, reward)
-        paths = append(paths, optimal_ctrl)
+    paths = np.array(
+        Parallel(n_jobs=-2)(
+            delayed(make_path)(reward) for reward in islice(rewards, n_rewards)
+        )
+    )
+    np.save(open(outdir / "optimal_paths.npy", "wb"), np.array(paths))
 
-        simulation_object = create_env("driver")
-        simulation_object.set_ctrl(optimal_ctrl)
+    simulation_object = create_env("driver")
+    for path in paths:
+        simulation_object.set_ctrl(path)
         simulation_object.watch(1)
 
         alignment = input("Aligned (y/n):").lower()
@@ -52,8 +67,7 @@ def collect(
             alignment = input("Aligned (y/n):").lower()
         gt_alignment = append(gt_alignment, alignment == "y")
 
-    np.save(open(outdir / "test_rewards.npy", "wb"), rewards)
-    np.save(open(outdir / "optimal_paths.npy", "wb"), np.array(paths))
+    np.save(open(outdir / "test_rewards.npy", "wb"), out_rewards)
     np.save(open(outdir / "aligment.npy", "wb"), gt_alignment)
 
 
