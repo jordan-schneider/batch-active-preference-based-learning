@@ -210,10 +210,13 @@ def make_human_confusion(
     df = df.convert_dtypes()
 
     # Seaborn tries to convert integer hues into rgb values. So we make them strings.
-    df["n"] = df["n"].astype(str)
     df["fpr"] = df.fp / (df.fp + df.tn)
     df["tpf"] = df.tp / (df.tp + df.fp + df.tn)
     df["fnr"] = df.fn / (df.fn + df.tp)
+    df["acc"] = (df.tn + df.tp) / (df.tp + df.fp + df.tn + df.fn)
+
+    df = df.sort_values(by="n")
+    df["n"] = df["n"].astype(str)
 
     return df
 
@@ -328,6 +331,40 @@ def plot_fnr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
     )
     plt.ylim((0, 1.01))
     plt.savefig(rootdir / ("fnr" + ablation + ".png"))
+    closefig()
+
+
+def plot_accuracy(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
+
+    plt.figure(figsize=(10, 10))
+
+    palette, hue_order = get_hue(hue, df)
+    xticks, xlabels = make_xaxis()
+
+    g = sns.relplot(
+        x="epsilon",
+        y="acc",
+        hue=hue,
+        kind="line",
+        palette=palette,
+        data=df,
+        ci=80,
+        hue_order=hue_order,
+        legend="brief",
+        aspect=2,
+    )
+
+    g._legend.texts[0].set_text("")
+
+    plt.xlabel(r"$\epsilon$")
+    plt.ylabel("Accuracy")
+    plt.title(r"$\epsilon$-Relaxation's Effect on Accuracy")
+    plt.xticks(
+        ticks=xticks, labels=xlabels,
+    )
+    plt.ylim((0, 1.01))
+    # plt.tight_layout()
+    plt.savefig(rootdir / ("acc" + ablation + ".png"))
     closefig()
 
 
@@ -490,3 +527,8 @@ if __name__ == "__main__":
     confusion = make_human_confusion()
     plot_fpr(confusion, rootdir, ablation, hue="n")
     plot_fnr(confusion, rootdir, ablation, hue="n")
+    plot_accuracy(confusion, rootdir, ablation, hue="n")
+
+    print("Best accuracy:")
+    print(confusion[confusion.acc == confusion.acc.max()])
+
