@@ -325,6 +325,7 @@ def load(path: Path, overwrite: bool) -> dict:
 
 
 def get_agreement(rewards: np.ndarray, test: np.ndarray) -> np.ndarray:
+    """ Returns mean agreement between reward weights and an oriented test set """
     return np.mean(np.dot(rewards, test.T) > 0, axis=1)
 
 
@@ -342,6 +343,22 @@ def run_experiment(
     factory: TestFactory,
     use_equiv: bool,
 ) -> Tuple[np.ndarray, np.ndarray, Experiment]:
+    """Distills a set of normals and preferences into a test using the factory, and runs that test on test_rewards
+
+    Args:
+        test_rewards (np.ndarray): Rewards to run test on
+        normals (np.ndarray): normal vector of halfplane constraints defining test questions
+        input_features (np.ndarray): reward features of trajectories in each question
+        preferences (np.ndarray): Human provided preference over trajectories
+        epsilon (float): Size of minimum value gap required for de-noising
+        delta (float): How much of the reward posterior must be over the value gap
+        n_human_samples (int): Number of preferences to prune down to
+        factory (TestFactory): Factory to produce test questions
+        use_equiv (bool): Allow equivalent preference labels?
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, Experiment]: indices of the selected test questions, test results for each reward, and experimental hyperparameters
+    """
     if n_human_samples == -1:
         n_human_samples == normals.shape[0]
     filtered_normals = normals[:n_human_samples]
@@ -391,6 +408,7 @@ def human(
     preferences_name: Path = Path("preferences.npy"),
     flags_name: Path = Path("flags.pkl"),
     datadir: Path = Path("questions"),
+    outdir: Path = Path("questions"),
     rewards_path: Optional[Path] = None,
     use_equiv: bool = False,
     skip_remove_duplicates: bool = False,
@@ -429,14 +447,14 @@ def human(
         normals = (normals.T * preferences).T
     assert_normals(normals, use_equiv)
 
-    test_path = datadir / make_outname(
+    test_path = outdir / make_outname(
         skip_remove_duplicates,
         skip_noise_filtering,
         skip_epsilon_filtering,
         skip_redundancy_filtering,
         base="indices",
     )
-    test_results_path = datadir / make_outname(
+    test_results_path = outdir / make_outname(
         skip_remove_duplicates,
         skip_noise_filtering,
         skip_epsilon_filtering,
@@ -453,7 +471,7 @@ def human(
         test_rewards = make_rewards(n_rewards, use_equiv)
     else:
         test_rewards = np.load(open(datadir / rewards_path, "rb"))
-    np.save(datadir / "test_rewards.npy", test_rewards)
+    np.save(outdir / "test_rewards.npy", test_rewards)
 
     experiments = make_experiments(
         epsilons,
