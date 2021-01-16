@@ -1,0 +1,10 @@
+gym
+fire
+numpy
+scipy
+mujoco-py
+theano
+matplotlib
+argh
+joblib
+sklearn
