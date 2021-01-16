@@ -77,10 +77,6 @@ def main(
     )
 
     simulation_object = create_env(task)
-    # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
-    questions = make_questions(
-        n_questions=n_questions, simulation_object=simulation_object
-    )
 
     if inputs is not None and inputs.shape[0] > input_features.shape[0]:
         logging.info("Catching up.")
@@ -94,12 +90,21 @@ def main(
             input_features, normals, preferences, phi_A, phi_B, preference, outpath
         )
 
-    assert inputs.shape[0] == input_features.shape[0]
-    assert inputs.shape[0] == normals.shape[0]
-    assert inputs.shape[0] == preferences.shape[0]
+    # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
+    questions = make_questions(
+        n_questions=n_questions - inputs.shape[0], simulation_object=simulation_object
+    )
+
+    if inputs is not None:
+        assert inputs.shape[0] == input_features.shape[0]
+        assert inputs.shape[0] == normals.shape[0]
+        assert inputs.shape[0] == preferences.shape[0]
 
     for input_A, input_B in questions:
         inputs = update_inputs(input_A, input_B, inputs, outpath)
+
+        if inputs.shape[0] % 10 == 0:
+            logging.info(f"{inputs.shape[0]} of {n_questions}")
 
         phi_A, phi_B, preference = get_feedback(
             simulation_object, input_A, input_B, query_type
