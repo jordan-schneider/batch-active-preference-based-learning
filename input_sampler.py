@@ -1,8 +1,12 @@
+# Randomly samples the space of all possible trajectories to populate ctrl_samples.
+
+import os
+import sys
+
+import numpy as np
+
 from algos import generate_psi
 from simulation_utils import create_env
-import numpy as np
-import sys
-import os
 
 task = sys.argv[1].lower()
 D = int(sys.argv[2])
