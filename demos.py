@@ -48,6 +48,20 @@ def append(a: Optional[np.ndarray], b: Union[np.ndarray, int]) -> np.ndarray:
             return np.append(a, b)
 
 
+def simulated(
+    task: str,
+    criterion: str,
+    query_type: str,
+    epsilon: float,
+    M: int,
+    delta: float,
+    outdir: Path = Path("questions"),
+    overwrite: bool = False,
+):
+    # TODO(joschnei): Write simulated human script for "asking easy questions" method
+    pass
+
+
 def nonbatch(
     task: str,
     criterion: str,

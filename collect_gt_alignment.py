@@ -44,8 +44,13 @@ def collect(
             "std from which to sample the test rewards."
         )
 
+    # TODO(joschnei): Handle hot loading in cases where the trajectories were done but the gt
+    # alignment wasn't collected, or in cases where new rewards were appended but the trajectories
+    # weren't done.
+
     out_rewards = load(outdir, "test_rewards.npy", overwrite=overwrite)
     out_rewards = append(out_rewards, rewards)
+    np.save(open(outdir / "test_rewards.npy", "wb"), out_rewards)
 
     paths = load(outdir, "optimal_paths.npy", overwrite=overwrite)
     gt_alignment = load(outdir, "aligment.npy", overwrite=overwrite)
@@ -67,7 +72,6 @@ def collect(
             alignment = input("Aligned (y/n):").lower()
         gt_alignment = append(gt_alignment, alignment == "y")
 
-    np.save(open(outdir / "test_rewards.npy", "wb"), out_rewards)
     np.save(open(outdir / "aligment.npy", "wb"), gt_alignment)
 
 

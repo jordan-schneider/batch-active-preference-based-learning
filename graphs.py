@@ -1,8 +1,8 @@
 import pickle
 import sys
-from itertools import islice
+from enum import Enum, auto
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 import pandas as pd  # type: ignore
@@ -13,17 +13,22 @@ from sklearn.metrics import confusion_matrix  # type: ignore
 from run_tests import Experiment
 
 
+class Style(Enum):
+    PAPER = auto()
+    POSTER = auto()
+
+
 def get_interactive():
     """ Cursed magic for determining if the code is being run in an interactive environment. """
     return getattr(sys, "ps1", None) is not None
 
 
-def closefig(out: Optional[Path] = None):
+def closefig(out: Optional[Path] = None, transparent: bool = False):
     if get_interactive() and out is None:
         plt.show()
     else:
         if out is not None:
-            plt.savefig(out)
+            plt.savefig(out, transparent=transparent)
         plt.close()
 
 
@@ -334,7 +339,14 @@ def plot_fnr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
     closefig()
 
 
-def plot_accuracy(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
+def plot_accuracy(
+    df: pd.DataFrame,
+    rootdir: Path,
+    ablation: str,
+    hue: str = "n",
+    transparent: bool = False,
+    style: Style = Style.PAPER,
+):
 
     plt.figure(figsize=(10, 10))
 
@@ -356,16 +368,19 @@ def plot_accuracy(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"
 
     g._legend.texts[0].set_text("")
 
-    plt.xlabel(r"$\epsilon$")
-    plt.ylabel("Accuracy")
-    plt.title(r"$\epsilon$-Relaxation's Effect on Accuracy")
+    if style == Style.POSTER:
+        plt.xlabel("Value Slack")
+        plt.ylabel("Accuracy")
+    elif style == Style.PAPER:
+        plt.xlabel(r"$\epsilon$")
+        plt.ylabel("Accuracy")
+        plt.title(r"$\epsilon$-Relaxation's Effect on Accuracy")
     plt.xticks(
         ticks=xticks, labels=xlabels,
     )
     plt.ylim((0, 1.01))
     # plt.tight_layout()
-    plt.savefig(rootdir / ("acc" + ablation + ".png"))
-    closefig()
+    closefig(out=rootdir / ("acc" + ablation + ".png"), transparent=transparent)
 
 
 def get_rows_per_replication(df: pd.DataFrame) -> int:
@@ -520,15 +535,18 @@ def plot_noise(rootdir: Path = Path("noisy-questions"), n_replications: int = 10
 if __name__ == "__main__":
     plt.rc("text", usetex=True)
     plt.rcParams.update({"font.size": 33})
+    plt.style.use("dark_background")
 
     rootdir = Path("questions")
     ablation = ".skip_noise"
 
     confusion = make_human_confusion()
-    plot_fpr(confusion, rootdir, ablation, hue="n")
-    plot_fnr(confusion, rootdir, ablation, hue="n")
-    plot_accuracy(confusion, rootdir, ablation, hue="n")
+    # plot_fpr(confusion, rootdir, ablation, hue="n")
+    # plot_fnr(confusion, rootdir, ablation, hue="n")
+    plot_accuracy(
+        confusion, rootdir, ablation, hue="n", transparent=True, style=Style.POSTER
+    )
 
-    print("Best accuracy:")
-    print(confusion[confusion.acc == confusion.acc.max()])
+    # print("Best accuracy:")
+    # print(confusion[confusion.acc == confusion.acc.max()])
 
