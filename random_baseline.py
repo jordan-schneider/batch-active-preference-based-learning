@@ -1,3 +1,4 @@
+import logging
 import pickle
 from pathlib import Path
 
@@ -24,24 +25,32 @@ def update_response(
     np.save(outdir / "input_features.npy", input_features)
     np.save(outdir / "normals.npy", normals)
     np.save(outdir / "preferences.npy", preferences)
+    return input_features, normals, preferences
 
 
 def make_questions(n_questions: int, simulation_object) -> np.ndarray:
-    z = simulation_object.feed_size
     lower_input_bound = [x[0] for x in simulation_object.feed_bounds]
     upper_input_bound = [x[1] for x in simulation_object.feed_bounds]
-    return np.random.uniform(low=2 * lower_input_bound, high=2 * upper_input_bound, size=(n_questions, 2 * z))
+    inputs = np.random.uniform(
+        low=2 * lower_input_bound,
+        high=2 * upper_input_bound,
+        size=(n_questions, 2 * simulation_object.feed_size),
+    )
+    inputs = np.reshape(inputs, (n_questions, 2, -1))
+    return inputs
 
 
 def main(
     task: str,
     query_type: str,
     n_questions: int,
-    delta: float,
-    reward_iterations: int,
+    delta: float = 1.1,
+    reward_iterations: int = 100,
     outdir: str = "random_questions",
     overwrite: bool = False,
 ):
+    logging.basicConfig(level=logging.INFO)
+
     outpath = Path(outdir)
 
     if not outpath.exists():
@@ -59,27 +68,46 @@ def main(
     )
 
     normals: np.ndarray = load(outpath, filename="normals.npy", overwrite=overwrite)
-    preferences: np.ndarray = load(outpath, filename="preferences.npy", overwrite=overwrite)
+    preferences: np.ndarray = load(
+        outpath, filename="preferences.npy", overwrite=overwrite
+    )
     inputs: np.ndarray = load(outpath, filename="inputs.npy", overwrite=overwrite)
-    input_features: np.ndarray = load(outpath, filename="input_features.npy", overwrite=overwrite)
+    input_features: np.ndarray = load(
+        outpath, filename="input_features.npy", overwrite=overwrite
+    )
 
     simulation_object = create_env(task)
     # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
-    questions = make_questions(n_questions=n_questions, simulation_object=simulation_object)
+    questions = make_questions(
+        n_questions=n_questions, simulation_object=simulation_object
+    )
 
-    if inputs.shape[0] > input_features.shape[0]:
+    if inputs is not None and inputs.shape[0] > input_features.shape[0]:
+        logging.info("Catching up.")
         input_A, input_B = inputs[-1]
 
-        phi_A, phi_B, preference = get_feedback(simulation_object, input_A, input_B, query_type)
+        phi_A, phi_B, preference = get_feedback(
+            simulation_object, input_A, input_B, query_type
+        )
 
-        update_response(input_features, normals, preferences, phi_A, phi_B, preference, outpath)
+        input_features, normals, preferences = update_response(
+            input_features, normals, preferences, phi_A, phi_B, preference, outpath
+        )
 
-    for (input_A, input_B) in questions:
-        update_inputs(input_A, input_B, inputs, outpath)
+    assert inputs.shape[0] == input_features.shape[0]
+    assert inputs.shape[0] == normals.shape[0]
+    assert inputs.shape[0] == preferences.shape[0]
 
-        phi_A, phi_B, preference = get_feedback(simulation_object, input_A, input_B, query_type)
+    for input_A, input_B in questions:
+        inputs = update_inputs(input_A, input_B, inputs, outpath)
 
-        update_response(input_features, normals, preferences, phi_A, phi_B, preference, outpath)
+        phi_A, phi_B, preference = get_feedback(
+            simulation_object, input_A, input_B, query_type
+        )
+
+        input_features, normals, preferences = update_response(
+            input_features, normals, preferences, phi_A, phi_B, preference, outpath
+        )
 
     save_reward(
         query_type=query_type,
