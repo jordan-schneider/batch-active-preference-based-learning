@@ -63,7 +63,7 @@ def collect(
                 single_normals = np.load(normals_path)
                 single_preferences = np.load(preferences_path)
                 single_normals = (single_normals.T * single_preferences).T
-                normals = append(normals, single_normals, flat=True) 
+                normals = append(normals, single_normals, flat=True)
             # TODO(joschnei): These can all be loaded in from flags.pkl, but I'm too lazy for that.
             mean_reward = make_mode_reward(
                 query_type="strict", true_delta=1.1, w_sampler=Sampler(create_env("driver").num_of_features), M=100
@@ -80,10 +80,10 @@ def collect(
             rewards = rewards / np.linalg.norm(rewards)
 
             # See models.py for reward feature details.
-            rewards[:,0] = np.abs(rewards[:,0])
-            rewards[:,1] = -np.abs(rewards[:,1])
-            rewards[:,2] = np.abs(rewards[:,2])
-            rewards[:,3] = -np.abs(rewards[:,3])
+            rewards[:, 0] = np.abs(rewards[:, 0])
+            rewards[:, 1] = -np.abs(rewards[:, 1])
+            rewards[:, 2] = np.abs(rewards[:, 2])
+            rewards[:, 3] = -np.abs(rewards[:, 3])
         else:
             raise ValueError(
                 "You must either supply a path to the test rewards, or a mean reward and "
@@ -107,7 +107,7 @@ def collect(
         assert paths is not None
     np.save(open(outdir / "optimal_paths.npy", "wb"), np.array(paths))
 
-    gt_alignment = load(outdir, "aligment.npy", overwrite=overwrite)
+    gt_alignment = load(outdir, "alignment.npy", overwrite=overwrite)
     new_gt_index = gt_alignment.size if gt_alignment is not None else 0
 
     if skip_human:
@@ -123,7 +123,7 @@ def collect(
             alignment = input("Aligned (y/n):").lower()
         gt_alignment = append(gt_alignment, alignment == "y")
 
-    np.save(open(outdir / "aligment.npy", "wb"), gt_alignment)
+    np.save(open(outdir / "alignment.npy", "wb"), gt_alignment)
 
 
 if __name__ == "__main__":

@@ -57,9 +57,7 @@ def make_palette_maps(experiments: Sequence[Experiment]):
 
 
 def get_hue(hue: str, df):
-    ns_palette_map, deltas_palette_map = make_palette_maps(
-        df.loc[:, ["epsilon", "delta", "n"]].drop_duplicates().to_numpy()
-    )
+    ns_palette_map, deltas_palette_map = make_palette_maps(df.loc[:, ["epsilon", "delta", "n"]].drop_duplicates().to_numpy())
     if hue == "n":
         palette = ns_palette_map
         hue_order = df["n"].unique()
@@ -76,10 +74,7 @@ def get_hue(hue: str, df):
 
 
 def check(
-    normals: np.ndarray,
-    indices: np.ndarray,
-    rewards: np.ndarray,
-    saved_agreements: Dict[Experiment, np.ndarray],
+    normals: np.ndarray, indices: np.ndarray, rewards: np.ndarray, saved_agreements: Dict[Experiment, np.ndarray],
 ):
     """Reconstruct alignment decisions and check that they agree with cached values."""
     j = 0
@@ -96,9 +91,7 @@ def check(
             agreements.loc[j] = [epsilon, delta, n, True, agreement]
             j += 1
 
-        for agreement in np.mean(
-            np.dot(misaligned_rewards, validation_test) > 0, axis=1
-        ):
+        for agreement in np.mean(np.dot(misaligned_rewards, validation_test) > 0, axis=1):
             agreements.loc[j] = [epsilon, delta, n, False, agreement]
             j += 1
 
@@ -119,10 +112,7 @@ def make_agreements(file) -> pd.DataFrame:
     for predicted alignment, and a column for the fraction of holdout questions answered correctly.
     """
     agreements = pd.Series(pickle.load(file)).reset_index()
-    agreements = agreements.join(
-        agreements.apply(lambda x: list(x[0]), result_type="expand", axis="columns"),
-        rsuffix="_",
-    )
+    agreements = agreements.join(agreements.apply(lambda x: list(x[0]), result_type="expand", axis="columns"), rsuffix="_",)
     del agreements["0"]
     agreements.columns = ["epsilon", "delta", "n", "aligned", "misaligned"]
     agreements = agreements.set_index(["epsilon", "delta", "n"]).stack().reset_index()
@@ -135,21 +125,10 @@ def make_agreements(file) -> pd.DataFrame:
     return agreements
 
 
-def plot_agreements(
-    agreements: pd.DataFrame,
-    epsilon: float,
-    delta: float,
-    n: int,
-    out: Optional[Path] = None,
-) -> None:
+def plot_agreements(agreements: pd.DataFrame, epsilon: float, delta: float, n: int, out: Optional[Path] = None,) -> None:
     """ Plots histograms of how many agents had different amounts of holdout agreement for agents
     prediced tobe aligned and misaligned."""
-    tmp = agreements[
-        np.logical_and(
-            np.logical_and(agreements.epsilon == epsilon, agreements.delta == delta),
-            agreements.n == n,
-        )
-    ]
+    tmp = agreements[np.logical_and(np.logical_and(agreements.epsilon == epsilon, agreements.delta == delta), agreements.n == n,)]
 
     tmp[tmp.aligned].value.hist(label="aligned", alpha=0.3)
     tmp[tmp.aligned == False].value.hist(label="misaligned", alpha=0.3)
@@ -160,14 +139,10 @@ def plot_agreements(
 
 
 def plot_mean_agreement(agreements: pd.DataFrame, out: Optional[Path] = None) -> None:
-    mean_agreement = (
-        agreements.groupby(["epsilon", "delta", "n", "aligned"]).mean().reset_index()
-    )
+    mean_agreement = agreements.groupby(["epsilon", "delta", "n", "aligned"]).mean().reset_index()
     plt.hist(mean_agreement[mean_agreement.aligned].value, label="aligned", alpha=0.3)
     plt.hist(
-        mean_agreement[np.logical_not(mean_agreement.aligned)].value,
-        label="unaligned",
-        alpha=0.3,
+        mean_agreement[np.logical_not(mean_agreement.aligned)].value, label="unaligned", alpha=0.3,
     )
 
     plt.xlabel("\% holdout agreement")
@@ -176,7 +151,7 @@ def plot_mean_agreement(agreements: pd.DataFrame, out: Optional[Path] = None) ->
 
 
 def make_human_confusion(
-    label_path: Path = Path("questions/gt_rewards/aligment.npy"),
+    label_path: Path = Path("questions/gt_rewards/alignment.npy"),
     prediction_path: Path = Path("questions/test_results.skip_noise.pkl"),
 ) -> pd.DataFrame:
     label = np.load(label_path)
@@ -187,22 +162,10 @@ def make_human_confusion(
         epsilon, delta, n = experiment
         if n <= 0:
             continue
-        confusion = confusion_matrix(
-            y_true=label, y_pred=prediction, labels=[False, True]
-        )
-        confusions.append(
-            (
-                *experiment,
-                confusion[0][0],
-                confusion[0][1],
-                confusion[1][0],
-                confusion[1][1],
-            )
-        )
+        confusion = confusion_matrix(y_true=label, y_pred=prediction, labels=[False, True])
+        confusions.append((*experiment, confusion[0][0], confusion[0][1], confusion[1][0], confusion[1][1],))
 
-    df = pd.DataFrame(
-        confusions, columns=["epsilon", "delta", "n", "tn", "fp", "fn", "tp"],
-    )
+    df = pd.DataFrame(confusions, columns=["epsilon", "delta", "n", "tn", "fp", "fn", "tp"],)
 
     # idx = pd.MultiIndex.from_tuples(
     #     confusion_dict.keys(), names=["epsilon", "delta", "n"]
@@ -237,12 +200,7 @@ def read_confusion(dir: Path, ablation: str = ""):
     out.columns = ["epsilon", "delta", "n", "confusion"]
     out = out.join(
         out.apply(
-            lambda x: [
-                int(x.confusion[0][0]),
-                int(x.confusion[0][1]),
-                int(x.confusion[1][0]),
-                int(x.confusion[1][1]),
-            ],
+            lambda x: [int(x.confusion[0][0]), int(x.confusion[0][1]), int(x.confusion[1][0]), int(x.confusion[1][1]),],
             result_type="expand",
             axis="columns",
         )
@@ -256,9 +214,7 @@ def read_replications(rootdir: Path, ablation: str, replications: Optional[int] 
     df = pd.DataFrame(columns=["epsilon", "n", "tn", "fp", "tp"])
     if replications is not None:
         for replication in range(1, replications + 1):
-            df = df.append(
-                read_confusion(rootdir / str(replication), ablation=ablation)
-            )
+            df = df.append(read_confusion(rootdir / str(replication), ablation=ablation))
     else:
         df = read_confusion(rootdir, ablation=ablation)
 
@@ -340,12 +296,7 @@ def plot_fnr(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
 
 
 def plot_accuracy(
-    df: pd.DataFrame,
-    rootdir: Path,
-    ablation: str,
-    hue: str = "n",
-    transparent: bool = False,
-    style: Style = Style.PAPER,
+    df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n", transparent: bool = False, style: Style = Style.PAPER,
 ):
 
     plt.figure(figsize=(10, 10))
@@ -388,11 +339,7 @@ def get_rows_per_replication(df: pd.DataFrame) -> int:
 
 
 def plot_individual_fpr(
-    df: pd.DataFrame,
-    rootdir: Path,
-    ablation: str,
-    hue: str = "n",
-    n_replications: int = 10,
+    df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n", n_replications: int = 10,
 ):
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis()
@@ -427,9 +374,7 @@ def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n):
     df = df[df.n == n]
     plt.figure(figsize=(10, 10))
 
-    g = sns.relplot(
-        x="epsilon", y="fpr", kind="line", data=df, ci=80, legend="brief", aspect=2,
-    )
+    g = sns.relplot(x="epsilon", y="fpr", kind="line", data=df, ci=80, legend="brief", aspect=2,)
 
     plt.xlabel(r"$\epsilon$")
     plt.ylabel("False Postive Rate")
@@ -468,11 +413,7 @@ def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
 
 
 def plot_individual_tp(
-    df: pd.DataFrame,
-    rootdir: Path,
-    ablation: str,
-    hue: str = "n",
-    n_replications: int = 10,
+    df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n", n_replications: int = 10,
 ):
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis()
@@ -520,16 +461,12 @@ def plot_no_noise(rootdir: Path = Path("questions"), n_replications: int = 10):
 
 
 def plot_noise(rootdir: Path = Path("noisy-questions"), n_replications: int = 10):
-    noise_without_filtering = read_replications(
-        rootdir=rootdir, ablation=".skip_noise", replications=n_replications
-    )
+    noise_without_filtering = read_replications(rootdir=rootdir, ablation=".skip_noise", replications=n_replications)
     fill_na(noise_without_filtering)
 
     plot_fpr(df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise")
     plot_fnr(df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise")
-    plot_largest_fpr(
-        df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise", n="1000"
-    )
+    plot_largest_fpr(df=noise_without_filtering, rootdir=rootdir, ablation=".skip_noise", n="1000")
 
 
 if __name__ == "__main__":
@@ -537,16 +474,16 @@ if __name__ == "__main__":
     plt.rcParams.update({"font.size": 33})
     plt.style.use("dark_background")
 
-    rootdir = Path("questions")
+    rootdir = Path("random_questions/comparison_test")
     ablation = ".skip_noise"
 
-    confusion = make_human_confusion()
-    # plot_fpr(confusion, rootdir, ablation, hue="n")
-    # plot_fnr(confusion, rootdir, ablation, hue="n")
-    plot_accuracy(
-        confusion, rootdir, ablation, hue="n", transparent=True, style=Style.POSTER
+    confusion = make_human_confusion(
+        label_path=Path("random_questions/comparison_test/alignment.npy"),
+        prediction_path=Path("random_questions/comparison_test/test_results.skip_noise.pkl"),
     )
+    plot_fpr(confusion, rootdir, ablation, hue="n")
+    plot_fnr(confusion, rootdir, ablation, hue="n")
+    plot_accuracy(confusion, rootdir, ablation, hue="n", transparent=True, style=Style.POSTER)
 
-    # print("Best accuracy:")
-    # print(confusion[confusion.acc == confusion.acc.max()])
-
+    print("Best accuracy:")
+    print(confusion[confusion.acc == confusion.acc.max()])
