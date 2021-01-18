@@ -19,11 +19,14 @@ def load(outdir: Path, filename: str, overwrite: bool) -> Optional[np.ndarray]:
     return None
 
 
-def save_reward(query_type: str, true_delta: float, w_sampler, M: int, outdir: Path):
+def make_mode_reward(query_type: str, true_delta: float, w_sampler, M: int) -> np.ndarray:
     w_samples, _ = w_sampler.sample_given_delta(M, query_type, true_delta)
     mean_weight = np.mean(w_samples, axis=0)
     normalized_mean_weight = mean_weight / np.linalg.norm(mean_weight)
-    np.save(outdir / "mean_reward.npy", normalized_mean_weight)
+    return normalized_mean_weight
+
+def save_reward(query_type: str, true_delta: float, w_sampler, M: int, outdir: Path):
+    np.save(outdir / "mean_reward.npy", make_mode_reward(query_type, true_delta, w_sampler, M))
 
 
 def update_inputs(
@@ -35,15 +38,18 @@ def update_inputs(
     return inputs
 
 
-def append(a: Optional[np.ndarray], b: Union[np.ndarray, int]) -> np.ndarray:
+def append(a: Optional[np.ndarray], b: Union[np.ndarray, int], flat=False) -> np.ndarray:
+    if isinstance(b, np.ndarray) and not flat:
+        b = b.reshape((1, *b.shape))
+
     if a is None:
         if isinstance(b, np.ndarray):
-            return b.reshape(1, *b.shape)
+            return b
         elif isinstance(b, int):
             return np.array([b])
     else:
         if isinstance(b, np.ndarray):
-            return np.append(a, b.reshape((1, *b.shape)), axis=0)
+            return np.append(a, b, axis=0)
         elif isinstance(b, int):
             return np.append(a, b)
 
