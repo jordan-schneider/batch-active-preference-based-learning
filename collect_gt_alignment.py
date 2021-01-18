@@ -26,7 +26,9 @@ def collect(
     mean_reward_path: Optional[Path] = None,
     normals_paths: Optional[List[Path]] = None,
     preferences_paths: Optional[List[Path]] = None,
+    use_random: bool = False,
     use_plausible: bool = False,
+    skip_human: bool = False,
     overwrite: bool = False,
 ) -> None:
     """Collects ground truth labels for the optimal trajectories of some reward functions.
@@ -69,10 +71,13 @@ def collect(
             assert np.all(np.isfinite(mean_reward))
             rewards = default_rng().normal(loc=mean_reward, scale=std, size=(num_new_rewards, *mean_reward.shape))
             assert np.all(np.isfinite(rewards))
+        elif use_random:
+            rewards = default_rng().normal(loc=0, scale=1, size=(num_new_rewards, create_env("driver").num_of_features))
+            rewards = rewards / np.linalg.norm(rewards)
         elif use_plausible:
             # Generate uniform rewards with plausible weights i.e. ones with the right sign
             rewards = default_rng().normal(loc=0, scale=1, size=(num_new_rewards, create_env("driver").num_of_features))
-            # rewards = rewards / np.linalg.norm(rewards)
+            rewards = rewards / np.linalg.norm(rewards)
 
             # See models.py for reward feature details.
             rewards[:,0] = np.abs(rewards[:,0])
@@ -104,6 +109,9 @@ def collect(
 
     gt_alignment = load(outdir, "aligment.npy", overwrite=overwrite)
     new_gt_index = gt_alignment.size if gt_alignment is not None else 0
+
+    if skip_human:
+        exit()
 
     simulation_object = create_env("driver")
     for path in paths[new_gt_index:]:
