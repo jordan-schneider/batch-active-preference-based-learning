@@ -470,7 +470,7 @@ def human(
     if rewards_path is None:
         test_rewards = make_rewards(n_rewards, use_equiv)
     else:
-        test_rewards = np.load(open(datadir / rewards_path, "rb"))
+        test_rewards = np.load(open(rewards_path, "rb"))
     np.save(outdir / "test_rewards.npy", test_rewards)
 
     experiments = make_experiments(
