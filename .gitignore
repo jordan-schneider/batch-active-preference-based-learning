@@ -24,3 +24,5 @@ log*.txt
 *.stl
 
 data/
+
+.hypothesis

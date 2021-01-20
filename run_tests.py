@@ -11,12 +11,14 @@ from typing import Dict, Generator, List, Optional, Sequence, Set, Tuple
 import argh  # type: ignore
 import numpy as np
 from argh import arg
-from joblib import Parallel, delayed  # type: ignore
+from joblib import Parallel, delayed, parallel
+from numpy.core.fromnumeric import prod  # type: ignore
 from numpy.linalg import norm
 from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
 from post import TestFactory
+from utils import replicate
 
 N_FEATURES = 4
 
@@ -88,7 +90,7 @@ def eval_test(normals: np.ndarray, rewards: np.ndarray, aligned: np.ndarray, use
 
     if normals.shape[0] > 0:
         results = run_test(normals, rewards, use_equiv)
-        print(f"predicted true={np.sum(results)}, predicted false={results.shape[0] - np.sum(results)}")
+        logging.info(f"predicted true={np.sum(results)}, predicted false={results.shape[0] - np.sum(results)}")
         return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
     else:
         return confusion_matrix(y_true=aligned, y_pred=np.ones(aligned.shape, dtype=bool), labels=[False, True],)
@@ -138,131 +140,6 @@ def add_equiv(preferences: np.ndarray, normals: np.ndarray, equiv_prob: float) -
             out_normals.append(np.append(normal * preference, [0]))
 
     return np.ndarray(out_normals)
-
-
-@arg("--epsilons", nargs="+", type=float)
-@arg("--human-samples", nargs="+", type=int)
-def gt(
-    epsilons: List[float] = [0.0],
-    n_rewards: int = 100,
-    human_samples: List[int] = [1],
-    n_model_samples: int = 1000,
-    input_features_name: Path = Path("input_features.npy"),
-    normals_name: Path = Path("normals.npy"),
-    preferences_name: Path = Path("preferences.npy"),
-    true_reward_name: Path = Path("true_reward.npy"),
-    flags_name: Path = Path("flags.pkl"),
-    datadir: Path = Path(),
-    outdir: Path = Path(),
-    use_equiv: bool = False,
-    skip_remove_duplicates: bool = False,
-    skip_noise_filtering: bool = False,
-    skip_epsilon_filtering: bool = False,
-    skip_redundancy_filtering: bool = False,
-    replications: Optional[str] = None,
-    overwrite: bool = False,
-) -> None:
-    """ Run tests with full data to determine how much reward noise gets"""
-    logging.basicConfig(level="DEBUG")
-
-    if replications is not None:
-        start, stop = replications.split("-")
-        for replication in range(int(start), int(stop) + 1):
-            gt(
-                epsilons,
-                n_rewards,
-                human_samples,
-                n_model_samples,
-                input_features_name,
-                normals_name,
-                preferences_name,
-                true_reward_name,
-                flags_name,
-                datadir / str(replication),
-                outdir / str(replication),
-                skip_remove_duplicates,
-                skip_noise_filtering,
-                skip_epsilon_filtering,
-                skip_redundancy_filtering,
-                overwrite,
-            )
-        return
-
-    input_features = np.load(datadir / input_features_name)
-    normals = np.load(datadir / normals_name)
-    preferences = np.load(datadir / preferences_name)
-    reward = np.load(datadir / true_reward_name)
-
-    assert not np.any(preferences == 0)
-
-    flags = pickle.load(open(datadir / flags_name, "rb"))
-    query_type = flags["query_type"]
-    equiv_probability = flags["delta"]
-
-    factory = TestFactory(
-        query_type=query_type,
-        reward_dimension=normals.shape[1],
-        equiv_probability=equiv_probability,
-        n_reward_samples=n_model_samples,
-        skip_remove_duplicates=skip_remove_duplicates,
-        skip_noise_filtering=skip_noise_filtering,
-        skip_epsilon_filtering=skip_epsilon_filtering,
-        skip_redundancy_filtering=skip_redundancy_filtering,
-    )
-
-    assert input_features.shape[0] > 0
-    assert preferences.shape[0] > 0
-    assert normals.shape[0] > 0
-    assert reward.shape == (N_FEATURES,)
-
-    if use_equiv:
-        normals = add_equiv(preferences, normals, equiv_prob=equiv_probability)
-        reward = np.append(reward, [1])
-    else:
-        if query_type == "weak":
-            preferences, input_features, normals = remove_equiv(preferences, input_features, normals)
-        normals = (normals.T * preferences).T
-    assert_normals(normals, use_equiv)
-
-    confusion_path = outdir / make_outname(
-        skip_remove_duplicates, skip_noise_filtering, skip_epsilon_filtering, skip_redundancy_filtering, base="confusion",
-    )
-    test_path = outdir / make_outname(
-        skip_remove_duplicates, skip_noise_filtering, skip_epsilon_filtering, skip_redundancy_filtering, base="indices",
-    )
-
-    confusions: Dict[Tuple[float, int], np.ndarray]
-    confusions = pickle.load(open(confusion_path, "rb")) if confusion_path.exists() and not overwrite else dict()
-
-    minimal_tests: Dict[Tuple[float, int], np.ndarray]
-    minimal_tests = pickle.load(open(test_path, "rb")) if test_path.exists() and not overwrite else dict()
-
-    for epsilon in epsilons:
-        if not overwrite and all([(epsilon, n) in confusions.keys() for n in human_samples]):
-            continue
-
-        rewards, aligned = find_reward_boundary(normals, n_rewards, reward, epsilon, use_equiv)
-        print(f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}")
-        for n in human_samples:
-            if not overwrite and (epsilon, n) in confusions.keys():
-                continue
-
-            print(f"Working on epsilon={epsilon}, n={n}")
-            filtered_normals = normals[:n]
-            filtered_normals, indices = factory.filter_halfplanes(
-                inputs_features=input_features, normals=filtered_normals, preferences=preferences, epsilon=epsilon,
-            )
-
-            minimal_tests[(epsilon, n)] = indices
-
-            confusion = eval_test(normals=filtered_normals, rewards=rewards, aligned=aligned, use_equiv=use_equiv,)
-
-            assert confusion.shape == (2, 2)
-
-            confusions[(epsilon, n)] = confusion
-
-    pickle.dump(confusions, open(confusion_path, "wb"))
-    pickle.dump(minimal_tests, open(test_path, "wb"))
 
 
 def validate(rewards: np.ndarray, prediction: np.ndarray, test: np.ndarray, use_equiv: bool) -> np.ndarray:
@@ -347,6 +224,134 @@ def make_experiments(
 @arg("--epsilons", nargs="+", type=float)
 @arg("--deltas", nargs="+", type=float)
 @arg("--human-samples", nargs="+", type=int)
+def gt(
+    epsilons: List[float] = [0.0],
+    deltas: List[float] = [0.05],
+    n_rewards: int = 100,
+    human_samples: List[int] = [1],
+    n_model_samples: int = 1000,
+    input_features_name: Path = Path("input_features.npy"),
+    normals_name: Path = Path("normals.npy"),
+    preferences_name: Path = Path("preferences.npy"),
+    true_reward_name: Path = Path("true_reward.npy"),
+    flags_name: Path = Path("flags.pkl"),
+    datadir: Path = Path(),
+    outdir: Path = Path(),
+    use_equiv: bool = False,
+    skip_remove_duplicates: bool = False,
+    skip_noise_filtering: bool = False,
+    skip_epsilon_filtering: bool = False,
+    skip_redundancy_filtering: bool = False,
+    replications: Optional[str] = None,
+    overwrite: bool = False,
+) -> None:
+    """ Run tests with full data to determine how much reward noise gets"""
+    logging.basicConfig(level="INFO")
+
+    if replications is not None:
+        # TODO(joschnei): Add better error handling for replications strings
+        start, stop = replications.split("-")
+        for replication in range(int(start), int(stop) + 1):
+            gt(
+                epsilons,
+                n_rewards,
+                human_samples,
+                n_model_samples,
+                input_features_name,
+                normals_name,
+                preferences_name,
+                true_reward_name,
+                flags_name,
+                datadir / str(replication),
+                outdir / str(replication),
+                skip_remove_duplicates,
+                skip_noise_filtering,
+                skip_epsilon_filtering,
+                skip_redundancy_filtering,
+                overwrite,
+            )
+        exit()
+
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    input_features = np.load(datadir / input_features_name)
+    normals = np.load(datadir / normals_name)
+    preferences = np.load(datadir / preferences_name)
+    reward = np.load(datadir / true_reward_name)
+
+    if not use_equiv:
+        assert not np.any(preferences == 0)
+
+    flags = pickle.load(open(datadir / flags_name, "rb"))
+    query_type = flags["query_type"]
+    equiv_probability = flags["delta"]
+
+    factory = TestFactory(
+        query_type=query_type,
+        reward_dimension=normals.shape[1],
+        equiv_probability=equiv_probability,
+        n_reward_samples=n_model_samples,
+        skip_remove_duplicates=skip_remove_duplicates,
+        skip_noise_filtering=skip_noise_filtering,
+        skip_epsilon_filtering=skip_epsilon_filtering,
+        skip_redundancy_filtering=skip_redundancy_filtering,
+    )
+
+    assert input_features.shape[0] > 0
+    assert preferences.shape[0] > 0
+    assert normals.shape[0] > 0
+    assert reward.shape == (N_FEATURES,)
+
+    if use_equiv:
+        normals = add_equiv(preferences, normals, equiv_prob=equiv_probability)
+        reward = np.append(reward, [1])
+    else:
+        if query_type == "weak":
+            preferences, input_features, normals = remove_equiv(preferences, input_features, normals)
+        normals = (normals.T * preferences).T
+    assert_normals(normals, use_equiv)
+
+    confusion_path = outdir / make_outname(
+        skip_remove_duplicates, skip_noise_filtering, skip_epsilon_filtering, skip_redundancy_filtering, base="confusion",
+    )
+    test_path = outdir / make_outname(
+        skip_remove_duplicates, skip_noise_filtering, skip_epsilon_filtering, skip_redundancy_filtering, base="indices",
+    )
+
+    confusions: Dict[Experiment, np.ndarray] = load(confusion_path, overwrite)
+    minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
+
+    for epsilon in epsilons:
+        if not overwrite and all([(epsilon, delta, n) in confusions.keys() for delta, n in product(deltas, human_samples)]):
+            continue
+
+        rewards, aligned = find_reward_boundary(normals, n_rewards, reward, epsilon, use_equiv)
+        logging.info(f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}")
+        for delta, n in product(deltas, human_samples):
+            if not overwrite and (epsilon, delta, n) in confusions.keys():
+                continue
+
+            logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n}")
+            filtered_normals = normals[:n]
+            filtered_normals, indices = factory.filter_halfplanes(
+                inputs_features=input_features, normals=filtered_normals, preferences=preferences, epsilon=epsilon, delta=delta
+            )
+
+            minimal_tests[(epsilon, delta, n)] = indices
+
+            confusion = eval_test(normals=filtered_normals, rewards=rewards, aligned=aligned, use_equiv=use_equiv)
+
+            assert confusion.shape == (2, 2)
+
+            confusions[(epsilon, delta, n)] = confusion
+
+    pickle.dump(confusions, open(confusion_path, "wb"))
+    pickle.dump(minimal_tests, open(test_path, "wb"))
+
+
+@arg("--epsilons", nargs="+", type=float)
+@arg("--deltas", nargs="+", type=float)
+@arg("--human-samples", nargs="+", type=int)
 def human(
     epsilons: List[float] = [0.0],
     deltas: List[float] = [0.05],
@@ -402,10 +407,8 @@ def human(
         skip_remove_duplicates, skip_noise_filtering, skip_epsilon_filtering, skip_redundancy_filtering, base="test_results",
     )
 
-    minimal_tests: Dict[Experiment, np.ndarray]
-    minimal_tests = load(test_path, overwrite)
-    results: Dict[Experiment, np.ndarray]
-    results = load(test_results_path, overwrite)
+    minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
+    results: Dict[Experiment, np.ndarray] = load(test_results_path, overwrite)
 
     if rewards_path is None:
         test_rewards = make_rewards(n_rewards, use_equiv)
@@ -413,10 +416,10 @@ def human(
         test_rewards = np.load(open(rewards_path, "rb"))
     np.save(outdir / "test_rewards.npy", test_rewards)
 
-    experiments = make_experiments(epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys()),)
+    experiments = make_experiments(epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys()))
 
     for indices, result, experiment in Parallel(n_jobs=-2)(
-        delayed(run_experiment)(test_rewards, normals, input_features, preferences, epsilon, delta, n, factory, use_equiv,)
+        delayed(run_experiment)(test_rewards, normals, input_features, preferences, epsilon, delta, n, factory, use_equiv)
         for epsilon, delta, n in experiments
     ):
         minimal_tests[experiment] = indices
