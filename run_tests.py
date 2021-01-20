@@ -11,14 +11,12 @@ from typing import Dict, Generator, List, Optional, Sequence, Set, Tuple
 import argh  # type: ignore
 import numpy as np
 from argh import arg
-from joblib import Parallel, delayed, parallel
-from numpy.core.fromnumeric import prod  # type: ignore
-from numpy.linalg import norm
+from joblib import Parallel, delayed  # type: ignore
+from numpy.linalg import norm  # type: ignore
 from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
 from post import TestFactory
-from utils import replicate
 
 N_FEATURES = 4
 
