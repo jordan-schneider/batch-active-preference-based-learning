@@ -1,3 +1,4 @@
+import logging
 import pickle
 from pathlib import Path
 from typing import Optional, Union
@@ -25,13 +26,12 @@ def make_mode_reward(query_type: str, true_delta: float, w_sampler, M: int) -> n
     normalized_mean_weight = mean_weight / np.linalg.norm(mean_weight)
     return normalized_mean_weight
 
+
 def save_reward(query_type: str, true_delta: float, w_sampler, M: int, outdir: Path):
     np.save(outdir / "mean_reward.npy", make_mode_reward(query_type, true_delta, w_sampler, M))
 
 
-def update_inputs(
-    a_inputs: np.ndarray, b_inputs: np.ndarray, inputs: np.ndarray, outdir: Path,
-) -> np.ndarray:
+def update_inputs(a_inputs: np.ndarray, b_inputs: np.ndarray, inputs: np.ndarray, outdir: Path,) -> np.ndarray:
     """Adds a new pair of input trajectories (a_inputs, b_inputs) to the inputs list and saves it."""
     inputs = append(inputs, np.stack([a_inputs, b_inputs]))
     np.save(outdir / "inputs.npy", inputs)
@@ -83,25 +83,14 @@ def nonbatch(
     # make this None if you will also learn delta, and change the samplers below
     # from sample_given_delta to sample (and of course remove the true_delta argument)
     pickle.dump(
-        {
-            "task": task,
-            "criterion": criterion,
-            "query_type": query_type,
-            "epsilon": epsilon,
-            "M": M,
-            "delta": delta,
-        },
+        {"task": task, "criterion": criterion, "query_type": query_type, "epsilon": epsilon, "M": M, "delta": delta,},
         open(outdir / "flags.pkl", "wb"),
     )
 
     normals: np.ndarray = load(outdir, filename="normals.npy", overwrite=overwrite)
-    preferences: np.ndarray = load(
-        outdir, filename="preferences.npy", overwrite=overwrite
-    )
+    preferences: np.ndarray = load(outdir, filename="preferences.npy", overwrite=overwrite)
     inputs: np.ndarray = load(outdir, filename="inputs.npy", overwrite=overwrite)
-    input_features: np.ndarray = load(
-        outdir, filename="input_features.npy", overwrite=overwrite
-    )
+    input_features: np.ndarray = load(outdir, filename="input_features.npy", overwrite=overwrite)
 
     w_sampler = Sampler(d)
     if inputs is not None and preferences is not None:
@@ -110,21 +99,13 @@ def nonbatch(
     score = np.inf
     try:
         while score >= epsilon:
-            w_samples, delta_samples = w_sampler.sample_given_delta(
-                M, query_type, delta
-            )
+            w_samples, delta_samples = w_sampler.sample_given_delta(M, query_type, delta)
 
-            input_A, input_B, score = run_algo(
-                criterion, simulation_object, w_samples, delta_samples
-            )
+            input_A, input_B, score = run_algo(criterion, simulation_object, w_samples, delta_samples)
 
             if score > epsilon:
-                update_inputs(
-                    a_inputs=input_A, b_inputs=input_B, inputs=inputs, outdir=outdir
-                )
-                phi_A, phi_B, preference = get_feedback(
-                    simulation_object, input_A, input_B, query_type
-                )
+                update_inputs(a_inputs=input_A, b_inputs=input_B, inputs=inputs, outdir=outdir)
+                phi_A, phi_B, preference = get_feedback(simulation_object, input_A, input_B, query_type)
                 input_features = append(input_features, np.stack([phi_A, phi_B]))
                 normals = append(normals, phi_A - phi_B)
                 preferences = append(preferences, preference)
@@ -135,7 +116,7 @@ def nonbatch(
                 w_sampler.feed(phi_A, phi_B, [preference])
     except KeyboardInterrupt:
         # Pass through to finally
-        print("\nSaving results, please do not exit again.")
+        logging.warning("\nSaving results, please do not exit again.")
     finally:
         save_reward(query_type, delta, w_sampler, M, outdir)
 

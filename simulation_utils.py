@@ -1,5 +1,6 @@
+import logging
 from multiprocessing import Value
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
@@ -38,8 +39,7 @@ def get_feedback(simulation_object, input_A, input_B, query_type):
         elif query_type == "strict":
             selection = input("A/B to watch, 1/2 to vote: ").lower()
         else:
-            print("There is no query type called " + query_type)
-            exit(0)
+            raise ValueError("There is no query type called " + query_type)
         if selection == "a":
             simulation_object.feed(input_A)
             simulation_object.watch(1)
@@ -65,8 +65,7 @@ def create_env(task):
     elif task == "fetch":
         return Fetch()
     else:
-        print("There is no task called " + task)
-        exit(0)
+        raise ValueError("There is no task called " + task)
 
 
 def run_algo(criterion, simulation_object, w_samples, delta_samples):
@@ -77,8 +76,7 @@ def run_algo(criterion, simulation_object, w_samples, delta_samples):
     elif criterion == "random":
         return algos.random(simulation_object)
     else:
-        print("There is no criterion called " + criterion)
-        exit(0)
+        raise ValueError("There is no criterion called " + criterion)
 
 
 def func(ctrl_array, *args):
@@ -89,11 +87,12 @@ def func(ctrl_array, *args):
     return -np.mean(np.array(features).dot(w))
 
 
-def compute_best(simulation_object, w, iter_count=10):
+def compute_best(simulation_object, w, iter_count=10) -> np.ndarray:
     u = simulation_object.ctrl_size
     lower_ctrl_bound = [x[0] for x in simulation_object.ctrl_bounds]
     upper_ctrl_bound = [x[1] for x in simulation_object.ctrl_bounds]
     opt_val = np.inf
+    optimal_ctrl: Optional[np.ndarray] = None
     for _ in range(iter_count):
         temp_res = opt.fmin_l_bfgs_b(
             func,
@@ -105,7 +104,9 @@ def compute_best(simulation_object, w, iter_count=10):
         if temp_res[1] < opt_val:
             optimal_ctrl = temp_res[0]
             opt_val = temp_res[1]
-    print(-opt_val)
+    if optimal_ctrl is None:
+        raise RuntimeError("No solution found.")
+    logging.info(f"Optimal value=-{opt_val}")
     return optimal_ctrl
 
 

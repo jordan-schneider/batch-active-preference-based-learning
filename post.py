@@ -1,5 +1,6 @@
 """ Post-process noise and consistency filtering. """
 
+import logging
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -57,22 +58,16 @@ class TestFactory:
         self.skip_epsilon_filtering = skip_epsilon_filtering
         self.skip_redundancy_filtering = skip_redundancy_filtering
 
-    def sample_rewards(
-        self, a_phis: np.ndarray, b_phis: np.ndarray, preferences: np.ndarray,
-    ) -> np.ndarray:
+    def sample_rewards(self, a_phis: np.ndarray, b_phis: np.ndarray, preferences: np.ndarray,) -> np.ndarray:
         """ Samples n_samples rewards via MCMC. """
         w_sampler = Sampler(self.reward_dimension)
         for a_phi, b_phi, preference in zip(a_phis, b_phis, preferences):
             w_sampler.feed(a_phi, b_phi, [preference])
-        rewards, _ = w_sampler.sample_given_delta(
-            self.n_reward_samples, self.query_type, self.equiv_probability
-        )
+        rewards, _ = w_sampler.sample_given_delta(self.n_reward_samples, self.query_type, self.equiv_probability)
         return rewards
 
     @staticmethod
-    def remove_duplicates(
-        normals: np.ndarray, precision=0.0001
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def remove_duplicates(normals: np.ndarray, precision=0.0001) -> Tuple[np.ndarray, np.ndarray]:
         """ Remove halfspaces that have small cosine similarity to another. """
         out: List[np.ndarray] = list()
         indices: List[int] = list()
@@ -86,15 +81,9 @@ class TestFactory:
 
     @staticmethod
     def filter_noise(
-        normals: np.ndarray,
-        filtered_normals: np.ndarray,
-        indices: np.ndarray,
-        rewards: np.ndarray,
-        noise_threshold: float,
+        normals: np.ndarray, filtered_normals: np.ndarray, indices: np.ndarray, rewards: np.ndarray, noise_threshold: float,
     ):
-        filtered_indices = (
-            np.mean(np.dot(rewards, filtered_normals.T) > 0, axis=0) > noise_threshold
-        )
+        filtered_indices = np.mean(np.dot(rewards, filtered_normals.T) > 0, axis=0) > noise_threshold
         indices = indices[filtered_indices]
         assert all([row in filtered_normals for row in normals[indices]])
         filtered_normals = normals[indices].reshape(-1, normals.shape[1])
@@ -102,12 +91,7 @@ class TestFactory:
 
     @staticmethod
     def margin_filter(
-        normals: np.ndarray,
-        filtered_normals: np.ndarray,
-        indices: np.ndarray,
-        rewards: np.ndarray,
-        epsilon: float,
-        delta: float,
+        normals: np.ndarray, filtered_normals: np.ndarray, indices: np.ndarray, rewards: np.ndarray, epsilon: float, delta: float,
     ):
         opinions = np.dot(rewards, filtered_normals.T).T
         correct_opinions = opinions > epsilon
@@ -140,7 +124,7 @@ class TestFactory:
         if not self.skip_remove_duplicates:
             filtered_normals, indices = self.remove_duplicates(normals)
 
-            print(f"After removing duplicates, there are {len(indices)} questions.")
+            logging.info(f"After removing duplicates, there are {len(indices)} questions.")
 
         assert np.all(normals[indices] == filtered_normals)
 
@@ -149,41 +133,29 @@ class TestFactory:
                 if self.deterministic:
                     raise ValueError("Must provide rewards to use deterministic mode.")
                 if self.n_reward_samples is None:
-                    raise ValueError(
-                        "Must provide n_reward_samples if reward is not provided"
-                    )
+                    raise ValueError("Must provide n_reward_samples if reward is not provided")
 
-                rewards = self.sample_rewards(
-                    a_phis=a_phis, b_phis=b_phis, preferences=preferences
-                )
+                rewards = self.sample_rewards(a_phis=a_phis, b_phis=b_phis, preferences=preferences)
 
-            filtered_normals, indices = self.filter_noise(
-                normals, filtered_normals, indices, rewards, noise_threshold
-            )
+            filtered_normals, indices = self.filter_noise(normals, filtered_normals, indices, rewards, noise_threshold)
 
-            print(f"After noise filtering there are {len(indices)} questions.")
+            logging.info(f"After noise filtering there are {len(indices)} questions.")
 
         if not self.skip_epsilon_filtering and filtered_normals.shape[0] > 0:
             if not self.deterministic and self.n_reward_samples is not None:
                 # This reward generation logic is jank.
-                rewards = self.sample_rewards(
-                    a_phis=a_phis, b_phis=b_phis, preferences=preferences,
-                )
-            filtered_normals, indices = self.margin_filter(
-                normals, filtered_normals, indices, rewards, epsilon, delta
-            )
-            print(f"After epsilon delta filtering there are {len(indices)} questions.")
+                rewards = self.sample_rewards(a_phis=a_phis, b_phis=b_phis, preferences=preferences,)
+            filtered_normals, indices = self.margin_filter(normals, filtered_normals, indices, rewards, epsilon, delta)
+            logging.info(f"After epsilon delta filtering there are {len(indices)} questions.")
 
         if not self.skip_redundancy_filtering and filtered_normals.shape[0] > 0:
             # Remove redundant halfspaces
-            filtered_normals, constraint_indices = remove_redundant_constraints(
-                filtered_normals
-            )
+            filtered_normals, constraint_indices = remove_redundant_constraints(filtered_normals)
 
             constraint_indices = np.array(constraint_indices, dtype=np.int)
             indices = indices[constraint_indices]
             assert np.all(normals[indices] == filtered_normals)
 
-            print(f"After removing redundancies there are {len(indices)} questions.")
+            logging.info(f"After removing redundancies there are {len(indices)} questions.")
 
         return filtered_normals, indices
