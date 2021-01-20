@@ -252,6 +252,7 @@ def gt(
         for replication in range(int(start), int(stop) + 1):
             gt(
                 epsilons,
+                deltas,
                 n_rewards,
                 human_samples,
                 n_model_samples,
