@@ -1,6 +1,7 @@
 name: active-irl
 channels:
   - defaults
+  - conda-forge
 dependencies:
   - mkl-service
   - mypy
@@ -16,4 +17,10 @@ dependencies:
   - scikit-learn
   - argh
   - matplotlib
-prefix: /home/joschnei/anaconda3/envs/active-irl-3
+  - pip
+  - pip:
+    - gym
+    - mujoco_py
+    - pandas
+    - seaborn
+prefix: /home/joschnei/anaconda3/envs/active-irl
