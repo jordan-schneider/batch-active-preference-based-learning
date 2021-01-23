@@ -1,28 +1,25 @@
 name: active-irl
 channels:
   - defaults
-  - conda-forge
-  - menpo
 dependencies:
-  - osmesa
-  - mkl-service
-  - mypy
   - theano
-  - mesa-libgl-cos6-x86_64
-  - libgcrypt-cos6-x86_64
   - pymc
-  - libglu
-  - libgcrypt
-  - mesa-libgl-devel-cos6-x86_64
   - python=3.6
-  - pyopengl
-  - scikit-learn
-  - argh
-  - matplotlib
   - pip
   - pip:
-    - gym
     - mujoco_py
+    - gym
+    - pyopengl
+    - numpy
     - pandas
+    - matplotlib
     - seaborn
+    - scikit-learn
+    - scipy
+    - argh
+    - fire
+    - joblib
+    - mypy
+    - pylint
+    - black
 prefix: /home/joschnei/anaconda3/envs/active-irl
