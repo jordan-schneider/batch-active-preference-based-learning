@@ -2,7 +2,9 @@ name: active-irl
 channels:
   - defaults
   - conda-forge
+  - menpo
 dependencies:
+  - osmesa
   - mkl-service
   - mypy
   - theano
