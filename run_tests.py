@@ -40,7 +40,7 @@ def normalize(vectors: np.ndarray) -> np.ndarray:
     return (vectors.T / norm(vectors, axis=1)).T
 
 
-def make_rewards(n_rewards: int, use_equiv: bool) -> np.ndarray:
+def make_gaussian_rewards(n_rewards: int, use_equiv: bool) -> np.ndarray:
     """ Makes n_rewards uniformly sampled reward vectors of unit length."""
     assert n_rewards > 0
     dist = multivariate_normal(mean=np.zeros(N_FEATURES))
@@ -52,7 +52,11 @@ def make_rewards(n_rewards: int, use_equiv: bool) -> np.ndarray:
 
 
 def find_reward_boundary(
-    normals: np.ndarray, n_rewards: int, reward: np.ndarray, epsilon: float, use_equiv: bool,
+    normals: np.ndarray,
+    n_rewards: int,
+    reward: np.ndarray,
+    epsilon: float,
+    use_equiv: bool,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Generates n_rewards reward vectors and determines which are aligned. """
     assert_normals(normals, use_equiv)
@@ -60,7 +64,7 @@ def find_reward_boundary(
     assert epsilon >= 0.0
     assert_reward(reward, use_equiv)
 
-    rewards = make_rewards(n_rewards, use_equiv)
+    rewards = make_gaussian_rewards(n_rewards, use_equiv)
 
     normals = normals[reward @ normals.T > epsilon]
 
@@ -79,7 +83,9 @@ def run_test(normals: np.ndarray, test_rewards: np.ndarray, use_equiv: bool) -> 
     return results
 
 
-def eval_test(normals: np.ndarray, rewards: np.ndarray, aligned: np.ndarray, use_equiv: bool) -> np.ndarray:
+def eval_test(
+    normals: np.ndarray, rewards: np.ndarray, aligned: np.ndarray, use_equiv: bool
+) -> np.ndarray:
     """ Makes a confusion matrix by evaluating a test on the fake rewards. """
     assert rewards.shape[0] == aligned.shape[0]
 
@@ -88,10 +94,16 @@ def eval_test(normals: np.ndarray, rewards: np.ndarray, aligned: np.ndarray, use
 
     if normals.shape[0] > 0:
         results = run_test(normals, rewards, use_equiv)
-        logging.info(f"predicted true={np.sum(results)}, predicted false={results.shape[0] - np.sum(results)}")
+        logging.info(
+            f"predicted true={np.sum(results)}, predicted false={results.shape[0] - np.sum(results)}"
+        )
         return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
     else:
-        return confusion_matrix(y_true=aligned, y_pred=np.ones(aligned.shape, dtype=bool), labels=[False, True],)
+        return confusion_matrix(
+            y_true=aligned,
+            y_pred=np.ones(aligned.shape, dtype=bool),
+            labels=[False, True],
+        )
 
 
 def make_outname(
@@ -115,6 +127,7 @@ def make_outname(
 
 
 def remove_equiv(preferences: np.ndarray, *arrays: np.ndarray) -> Tuple[np.ndarray, ...]:
+    """ Finds equivalence preferences and removes them + the associated elements of *arrays. """
     indices = preferences != 0
     preferences = preferences[indices]
     out_arrays = list()
@@ -123,7 +136,10 @@ def remove_equiv(preferences: np.ndarray, *arrays: np.ndarray) -> Tuple[np.ndarr
     return (preferences, *out_arrays)
 
 
-def add_equiv(preferences: np.ndarray, normals: np.ndarray, equiv_prob: float) -> np.ndarray:
+def add_equiv_constraints(
+    preferences: np.ndarray, normals: np.ndarray, equiv_prob: float
+) -> np.ndarray:
+    """ Adds equivalence constraints to a set of halspace constraints. """
     out_normals = list()
     for preference, normal in zip(preferences, normals):
         if preference == 0:
@@ -140,22 +156,12 @@ def add_equiv(preferences: np.ndarray, normals: np.ndarray, equiv_prob: float) -
     return np.ndarray(out_normals)
 
 
-def validate(rewards: np.ndarray, prediction: np.ndarray, test: np.ndarray, use_equiv: bool) -> np.ndarray:
-    ground_truth = run_test(test, rewards, use_equiv)
-    return confusion_matrix(y_true=ground_truth, y_pred=prediction, labels=[False, True])
-
-
 def load(path: Path, overwrite: bool) -> dict:
     if overwrite:
         return dict()
     if path.exists():
         return pickle.load(open(path, "rb"))
     return dict()
-
-
-def get_agreement(rewards: np.ndarray, test: np.ndarray) -> np.ndarray:
-    """ Returns mean agreement between reward weights and an oriented test set """
-    return np.mean(np.dot(rewards, test.T) > 0, axis=1)
 
 
 Experiment = Tuple[float, float, int]
@@ -192,7 +198,11 @@ def run_experiment(
         n_human_samples == normals.shape[0]
     filtered_normals = normals[:n_human_samples]
     filtered_normals, indices = factory.filter_halfplanes(
-        inputs_features=input_features, normals=filtered_normals, preferences=preferences, epsilon=epsilon, delta=delta,
+        inputs_features=input_features,
+        normals=filtered_normals,
+        preferences=preferences,
+        epsilon=epsilon,
+        delta=delta,
     )
 
     experiment = (epsilon, delta, n_human_samples)
@@ -302,26 +312,41 @@ def gt(
     assert reward.shape == (N_FEATURES,)
 
     if use_equiv:
-        normals = add_equiv(preferences, normals, equiv_prob=equiv_probability)
+        normals = add_equiv_constraints(preferences, normals, equiv_prob=equiv_probability)
         reward = np.append(reward, [1])
     else:
         if query_type == "weak":
-            preferences, input_features, normals = remove_equiv(preferences, input_features, normals)
+            preferences, input_features, normals = remove_equiv(
+                preferences, input_features, normals
+            )
         normals = (normals.T * preferences).T
     assert_normals(normals, use_equiv)
 
     confusion_path = outdir / make_outname(
-        skip_remove_duplicates, skip_noise_filtering, skip_epsilon_filtering, skip_redundancy_filtering, base="confusion",
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="confusion",
     )
     test_path = outdir / make_outname(
-        skip_remove_duplicates, skip_noise_filtering, skip_epsilon_filtering, skip_redundancy_filtering, base="indices",
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="indices",
     )
 
     confusions: Dict[Experiment, np.ndarray] = load(confusion_path, overwrite)
     minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
 
     for epsilon in epsilons:
-        if not overwrite and all([(epsilon, delta, n) in confusions.keys() for delta, n in product(deltas, human_samples)]):
+        if not overwrite and all(
+            [
+                (epsilon, delta, n) in confusions.keys()
+                for delta, n in product(deltas, human_samples)
+            ]
+        ):
             continue
 
         rewards, aligned = find_reward_boundary(normals, n_rewards, reward, epsilon, use_equiv)
@@ -333,12 +358,18 @@ def gt(
             logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n}")
             filtered_normals = normals[:n]
             filtered_normals, indices = factory.filter_halfplanes(
-                inputs_features=input_features, normals=filtered_normals, preferences=preferences, epsilon=epsilon, delta=delta
+                inputs_features=input_features,
+                normals=filtered_normals,
+                preferences=preferences,
+                epsilon=epsilon,
+                delta=delta,
             )
 
             minimal_tests[(epsilon, delta, n)] = indices
 
-            confusion = eval_test(normals=filtered_normals, rewards=rewards, aligned=aligned, use_equiv=use_equiv)
+            confusion = eval_test(
+                normals=filtered_normals, rewards=rewards, aligned=aligned, use_equiv=use_equiv
+            )
 
             assert confusion.shape == (2, 2)
 
@@ -392,33 +423,55 @@ def human(
     )
 
     if use_equiv:
-        normals = add_equiv(preferences, normals, equiv_prob=equiv_probability)
+        normals = add_equiv_constraints(preferences, normals, equiv_prob=equiv_probability)
     else:
         if query_type == "weak":
-            preferences, input_features, normals = remove_equiv(preferences, input_features, normals)
+            preferences, input_features, normals = remove_equiv(
+                preferences, input_features, normals
+            )
         normals = (normals.T * preferences).T
     assert_normals(normals, use_equiv)
 
     test_path = outdir / make_outname(
-        skip_remove_duplicates, skip_noise_filtering, skip_epsilon_filtering, skip_redundancy_filtering, base="indices",
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="indices",
     )
     test_results_path = outdir / make_outname(
-        skip_remove_duplicates, skip_noise_filtering, skip_epsilon_filtering, skip_redundancy_filtering, base="test_results",
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="test_results",
     )
 
     minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
     results: Dict[Experiment, np.ndarray] = load(test_results_path, overwrite)
 
     if rewards_path is None:
-        test_rewards = make_rewards(n_rewards, use_equiv)
+        test_rewards = make_gaussian_rewards(n_rewards, use_equiv)
     else:
         test_rewards = np.load(open(rewards_path, "rb"))
     np.save(outdir / "test_rewards.npy", test_rewards)
 
-    experiments = make_experiments(epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys()))
+    experiments = make_experiments(
+        epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys())
+    )
 
     for indices, result, experiment in Parallel(n_jobs=-2)(
-        delayed(run_experiment)(test_rewards, normals, input_features, preferences, epsilon, delta, n, factory, use_equiv)
+        delayed(run_experiment)(
+            test_rewards,
+            normals,
+            input_features,
+            preferences,
+            epsilon,
+            delta,
+            n,
+            factory,
+            use_equiv,
+        )
         for epsilon, delta, n in experiments
     ):
         minimal_tests[experiment] = indices
