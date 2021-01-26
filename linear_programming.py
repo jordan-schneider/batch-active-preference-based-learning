@@ -98,11 +98,11 @@ def remove_redundant_constraints(
             halfspace, halfspaces_lp, epsilon
         ):
             # keep h
-            logging.info("Not redundant")
+            logging.debug("Not redundant")
             non_redundant_halfspaces.append(halfspace)
             indices.append(i)
         else:
-            logging.info("Redundant")
+            logging.debug("Redundant")
 
         halfspaces_to_check = halfspaces_to_check[1:]
     return np.array(non_redundant_halfspaces), np.array(indices)

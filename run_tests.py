@@ -167,7 +167,7 @@ def load(path: Path, overwrite: bool) -> dict:
 Experiment = Tuple[float, float, int]
 
 
-def run_experiment(
+def run_human_experiment(
     test_rewards: np.ndarray,
     normals: np.ndarray,
     input_features: np.ndarray,
@@ -210,6 +210,43 @@ def run_experiment(
     results = run_test(filtered_normals, test_rewards, use_equiv)
 
     return indices, results, experiment
+
+
+def run_gt_experiment(
+    normals: np.ndarray,
+    n_rewards: int,
+    reward: np.ndarray,
+    epsilon: float,
+    delta: float,
+    use_equiv: bool,
+    n_human_samples: int,
+    factory: TestFactory,
+    input_features: np.ndarray,
+    preferences: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, Experiment]:
+    experiment = (epsilon, delta, n_human_samples)
+    logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n_human_samples}")
+
+    # This takes 0.02-0.05 seconds on lovelace
+    rewards, aligned = find_reward_boundary(normals, n_rewards, reward, epsilon, use_equiv)
+    logging.info(f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}")
+
+    filtered_normals = normals[:n_human_samples]
+    filtered_normals, indices = factory.filter_halfplanes(
+        inputs_features=input_features,
+        normals=filtered_normals,
+        preferences=preferences,
+        epsilon=epsilon,
+        delta=delta,
+    )
+
+    confusion = eval_test(
+        normals=filtered_normals, rewards=rewards, aligned=aligned, use_equiv=use_equiv
+    )
+
+    assert confusion.shape == (2, 2)
+
+    return indices, confusion, experiment
 
 
 def make_experiments(
@@ -340,40 +377,27 @@ def gt(
     confusions: Dict[Experiment, np.ndarray] = load(confusion_path, overwrite)
     minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
 
-    for epsilon in epsilons:
-        if not overwrite and all(
-            [
-                (epsilon, delta, n) in confusions.keys()
-                for delta, n in product(deltas, human_samples)
-            ]
-        ):
-            continue
+    experiments = make_experiments(
+        epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys())
+    )
 
-        rewards, aligned = find_reward_boundary(normals, n_rewards, reward, epsilon, use_equiv)
-        logging.info(f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}")
-        for delta, n in product(deltas, human_samples):
-            if not overwrite and (epsilon, delta, n) in confusions.keys():
-                continue
-
-            logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n}")
-            filtered_normals = normals[:n]
-            filtered_normals, indices = factory.filter_halfplanes(
-                inputs_features=input_features,
-                normals=filtered_normals,
-                preferences=preferences,
-                epsilon=epsilon,
-                delta=delta,
-            )
-
-            minimal_tests[(epsilon, delta, n)] = indices
-
-            confusion = eval_test(
-                normals=filtered_normals, rewards=rewards, aligned=aligned, use_equiv=use_equiv
-            )
-
-            assert confusion.shape == (2, 2)
-
-            confusions[(epsilon, delta, n)] = confusion
+    for indices, confusion, experiment in Parallel(n_jobs=-2)(
+        delayed(run_gt_experiment)(
+            normals,
+            n_rewards,
+            reward,
+            epsilon,
+            delta,
+            use_equiv,
+            n,
+            factory,
+            input_features,
+            preferences,
+        )
+        for epsilon, delta, n in experiments
+    ):
+        minimal_tests[experiment] = indices
+        confusions[experiment] = confusion
 
     pickle.dump(confusions, open(confusion_path, "wb"))
     pickle.dump(minimal_tests, open(test_path, "wb"))
@@ -461,7 +485,7 @@ def human(
     )
 
     for indices, result, experiment in Parallel(n_jobs=-2)(
-        delayed(run_experiment)(
+        delayed(run_human_experiment)(
             test_rewards,
             normals,
             input_features,
