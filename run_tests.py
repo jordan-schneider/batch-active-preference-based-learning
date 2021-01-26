@@ -6,7 +6,7 @@ import pickle
 from itertools import product
 from math import log
 from pathlib import Path
-from typing import Dict, Generator, List, Optional, Sequence, Set, Tuple
+from typing import Dict, Generator, List, Optional, Sequence, Set, Tuple, Union
 
 import argh  # type: ignore
 import numpy as np
@@ -40,10 +40,12 @@ def normalize(vectors: np.ndarray) -> np.ndarray:
     return (vectors.T / norm(vectors, axis=1)).T
 
 
-def make_gaussian_rewards(n_rewards: int, use_equiv: bool) -> np.ndarray:
+def make_gaussian_rewards(
+    n_rewards: int, use_equiv: bool, mean: Optional[np.ndarray]
+) -> np.ndarray:
     """ Makes n_rewards uniformly sampled reward vectors of unit length."""
     assert n_rewards > 0
-    dist = multivariate_normal(mean=np.zeros(N_FEATURES))
+    dist = multivariate_normal(mean=mean if mean is not None else np.zeros(N_FEATURES))
     rewards = normalize(dist.rvs(size=n_rewards))
     if use_equiv:
         rewards = np.stack(rewards, np.ones(rewards.shape[0]), axis=1)
@@ -52,11 +54,7 @@ def make_gaussian_rewards(n_rewards: int, use_equiv: bool) -> np.ndarray:
 
 
 def find_reward_boundary(
-    normals: np.ndarray,
-    n_rewards: int,
-    reward: np.ndarray,
-    epsilon: float,
-    use_equiv: bool,
+    normals: np.ndarray, n_rewards: int, reward: np.ndarray, epsilon: float, use_equiv: bool,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Generates n_rewards reward vectors and determines which are aligned. """
     assert_normals(normals, use_equiv)
@@ -64,7 +62,7 @@ def find_reward_boundary(
     assert epsilon >= 0.0
     assert_reward(reward, use_equiv)
 
-    rewards = make_gaussian_rewards(n_rewards, use_equiv)
+    rewards = make_gaussian_rewards(n_rewards, use_equiv, reward)
 
     normals = normals[reward @ normals.T > epsilon]
 
@@ -100,9 +98,7 @@ def eval_test(
         return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
     else:
         return confusion_matrix(
-            y_true=aligned,
-            y_pred=np.ones(aligned.shape, dtype=bool),
-            labels=[False, True],
+            y_true=aligned, y_pred=np.ones(aligned.shape, dtype=bool), labels=[False, True],
         )
 
 
