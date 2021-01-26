@@ -223,8 +223,17 @@ def run_gt_experiment(
     factory: TestFactory,
     input_features: np.ndarray,
     preferences: np.ndarray,
+    outdir: Path,
 ) -> Tuple[np.ndarray, np.ndarray, Experiment]:
     experiment = (epsilon, delta, n_human_samples)
+
+    logdir = outdir / "logs"
+    logdir.mkdir(parents=True, exist_ok=True)
+
+    logging.basicConfig(
+        filename=logdir / f"{epsilon}.{delta}.{n_human_samples}.log", level=logging.INFO
+    )
+
     logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n_human_samples}")
 
     # This takes 0.02-0.05 seconds on lovelace
@@ -393,6 +402,7 @@ def gt(
             factory,
             input_features,
             preferences,
+            outdir,
         )
         for epsilon, delta, n in experiments
     ):
