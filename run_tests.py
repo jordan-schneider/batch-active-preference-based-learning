@@ -59,7 +59,11 @@ def make_gaussian_rewards(
 
 
 def find_reward_boundary(
-    normals: np.ndarray, n_rewards: int, reward: np.ndarray, epsilon: float, use_equiv: bool,
+    normals: np.ndarray,
+    n_rewards: int,
+    reward: np.ndarray,
+    epsilon: float,
+    use_equiv: bool,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Generates n_rewards reward vectors and determines which are aligned. """
     assert_normals(normals, use_equiv)
@@ -114,7 +118,9 @@ def eval_test(
         return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
     else:
         return confusion_matrix(
-            y_true=aligned, y_pred=np.ones(aligned.shape, dtype=bool), labels=[False, True],
+            y_true=aligned,
+            y_pred=np.ones(aligned.shape, dtype=bool),
+            labels=[False, True],
         )
 
 
@@ -243,7 +249,10 @@ def run_gt_experiment(
     logdir.mkdir(parents=True, exist_ok=True)
 
     logging.basicConfig(
-        filename=logdir / f"{epsilon}.{delta}.{n_human_samples}.log", level=logging.INFO
+        filename=logdir / f"{epsilon}.{delta}.{n_human_samples}.log",
+        filemode="w",
+        level=logging.INFO,
+        force=True,
     )
 
     logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n_human_samples}")
@@ -267,8 +276,6 @@ def run_gt_experiment(
     )
 
     assert confusion.shape == (2, 2)
-
-    logging.shutdown()
 
     return indices, confusion, experiment
 
