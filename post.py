@@ -19,6 +19,7 @@ class TestFactory:
         equiv_probability: Optional[float] = None,
         deterministic: bool = False,
         n_reward_samples: Optional[int] = None,
+        use_mean_reward: bool = False,
         skip_remove_duplicates: bool = False,
         skip_noise_filtering: bool = False,
         skip_epsilon_filtering: bool = False,
@@ -37,7 +38,7 @@ class TestFactory:
             deterministic (bool, optional): Whether to use a determinstic set of rewards for
                                             debugging. If True, you must provide rewards to the
                                             filter_halfplanes method. Defaults to False.
-            n_reward_samples (Optional[int], optional): How many rewards to sample when computing 
+            n_reward_samples (Optional[int], optional): How many rewards to sample when computing
                                                         the posterior. Ignored if determinstic is
                                                         True. Defaults to None.
             skip_remove_duplicates (bool, optional): Skips the duplicate removal filtering step.
@@ -53,17 +54,25 @@ class TestFactory:
         self.reward_dimension = reward_dimension
         self.equiv_probability = equiv_probability
         self.deterministic = deterministic
+        self.use_mean_reward = use_mean_reward
         self.skip_remove_duplicates = skip_remove_duplicates
         self.skip_noise_filtering = skip_noise_filtering
         self.skip_epsilon_filtering = skip_epsilon_filtering
         self.skip_redundancy_filtering = skip_redundancy_filtering
 
-    def sample_rewards(self, a_phis: np.ndarray, b_phis: np.ndarray, preferences: np.ndarray,) -> np.ndarray:
+    def sample_rewards(
+        self,
+        a_phis: np.ndarray,
+        b_phis: np.ndarray,
+        preferences: np.ndarray,
+    ) -> np.ndarray:
         """ Samples n_samples rewards via MCMC. """
         w_sampler = Sampler(self.reward_dimension)
         for a_phi, b_phi, preference in zip(a_phis, b_phis, preferences):
             w_sampler.feed(a_phi, b_phi, [preference])
-        rewards, _ = w_sampler.sample_given_delta(self.n_reward_samples, self.query_type, self.equiv_probability)
+        rewards, _ = w_sampler.sample_given_delta(
+            self.n_reward_samples, self.query_type, self.equiv_probability
+        )
         return rewards
 
     @staticmethod
@@ -81,23 +90,40 @@ class TestFactory:
 
     @staticmethod
     def filter_noise(
-        normals: np.ndarray, filtered_normals: np.ndarray, indices: np.ndarray, rewards: np.ndarray, noise_threshold: float,
+        normals: np.ndarray,
+        filtered_normals: np.ndarray,
+        indices: np.ndarray,
+        rewards: np.ndarray,
+        noise_threshold: float,
     ):
-        filtered_indices = np.mean(np.dot(rewards, filtered_normals.T) > 0, axis=0) > noise_threshold
+        filtered_indices = (
+            np.mean(np.dot(rewards, filtered_normals.T) > 0, axis=0) > noise_threshold
+        )
         indices = indices[filtered_indices]
         assert all([row in filtered_normals for row in normals[indices]])
         filtered_normals = normals[indices].reshape(-1, normals.shape[1])
         return filtered_normals, indices
 
-    @staticmethod
     def margin_filter(
-        normals: np.ndarray, filtered_normals: np.ndarray, indices: np.ndarray, rewards: np.ndarray, epsilon: float, delta: float,
+        self,
+        normals: np.ndarray,
+        filtered_normals: np.ndarray,
+        indices: np.ndarray,
+        rewards: np.ndarray,
+        epsilon: float,
+        delta: Optional[float] = None,
     ):
-        opinions = np.dot(rewards, filtered_normals.T).T
-        correct_opinions = opinions > epsilon
+        if self.use_mean_reward:
+            reward = np.mean(rewards)
+            filtered_indices = reward @ filtered_normals > epsilon
+        elif delta is not None:
+            opinions = np.dot(rewards, filtered_normals.T).T
+            correct_opinions = opinions > epsilon
+            # Filter halfspaces that don't have 1-d probability that the expected return gap is epsilon.
+            filtered_indices = np.mean(correct_opinions, axis=1) > 1.0 - delta
+        else:
+            raise ValueError("Must provide delta if not using point reward.")
 
-        # Filter halfspaces that don't have 1-d probability that the expected return gap is epsilon.
-        filtered_indices = np.mean(correct_opinions, axis=1) > 1 - delta
         indices = indices[filtered_indices]
         assert all([row in filtered_normals for row in normals[indices]])
         filtered_normals = normals[indices].reshape(-1, normals.shape[1])
@@ -109,13 +135,13 @@ class TestFactory:
         inputs_features: np.ndarray,
         normals: np.ndarray,
         preferences: np.ndarray,
-        noise_threshold: float = 0.7,
-        epsilon: float = 0.0,
-        delta: float = 0.05,
+        epsilon: float,
+        noise_threshold: Optional[float] = None,
+        delta: Optional[float] = None,
         rewards: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """ Filters test questions by removing noise answers, requiring answers have a gap of at
-        least epsilon, and removing redundant questions via linear programming. """
+        """Filters test questions by removing noise answers, requiring answers have a gap of at
+        least epsilon, and removing redundant questions via linear programming."""
         a_phis = inputs_features[:, 0]
         b_phis = inputs_features[:, 1]
         filtered_normals = normals
@@ -128,7 +154,7 @@ class TestFactory:
 
         assert np.all(normals[indices] == filtered_normals)
 
-        if not self.skip_noise_filtering:
+        if not self.skip_noise_filtering and noise_threshold is not None:
             if rewards is None:
                 if self.deterministic:
                     raise ValueError("Must provide rewards to use deterministic mode.")
@@ -137,15 +163,20 @@ class TestFactory:
 
                 rewards = self.sample_rewards(a_phis=a_phis, b_phis=b_phis, preferences=preferences)
 
-            filtered_normals, indices = self.filter_noise(normals, filtered_normals, indices, rewards, noise_threshold)
+            filtered_normals, indices = self.filter_noise(
+                normals, filtered_normals, indices, rewards, noise_threshold
+            )
 
             logging.info(f"After noise filtering there are {len(indices)} questions.")
 
         if not self.skip_epsilon_filtering and filtered_normals.shape[0] > 0:
             if not self.deterministic and self.n_reward_samples is not None:
                 # This reward generation logic is jank.
-                rewards = self.sample_rewards(a_phis=a_phis, b_phis=b_phis, preferences=preferences,)
-            filtered_normals, indices = self.margin_filter(normals, filtered_normals, indices, rewards, epsilon, delta)
+                rewards = self.sample_rewards(a_phis=a_phis, b_phis=b_phis, preferences=preferences)
+
+            filtered_normals, indices = self.margin_filter(
+                normals, filtered_normals, indices, rewards, epsilon, delta
+            )
             logging.info(f"After epsilon delta filtering there are {len(indices)} questions.")
 
         if not self.skip_redundancy_filtering and filtered_normals.shape[0] > 0:

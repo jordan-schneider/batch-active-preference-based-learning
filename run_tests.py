@@ -218,8 +218,8 @@ def run_human_experiment(
     filtered_normals, indices = factory.filter_halfplanes(
         inputs_features=input_features,
         normals=filtered_normals,
-        preferences=preferences,
         epsilon=epsilon,
+        preferences=preferences,
         delta=delta,
     )
 
@@ -266,8 +266,8 @@ def run_gt_experiment(
     filtered_normals, indices = factory.filter_halfplanes(
         inputs_features=input_features,
         normals=filtered_normals,
-        preferences=preferences,
         epsilon=epsilon,
+        preferences=preferences,
         delta=delta,
     )
 
@@ -314,6 +314,7 @@ def gt(
     datadir: Path = Path(),
     outdir: Path = Path(),
     use_equiv: bool = False,
+    use_mean_reward: bool = False,
     skip_remove_duplicates: bool = False,
     skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
@@ -368,6 +369,7 @@ def gt(
         reward_dimension=normals.shape[1],
         equiv_probability=equiv_probability,
         n_reward_samples=n_model_samples,
+        use_mean_reward=use_mean_reward,
         skip_remove_duplicates=skip_remove_duplicates,
         skip_noise_filtering=skip_noise_filtering,
         skip_epsilon_filtering=skip_epsilon_filtering,
