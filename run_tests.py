@@ -268,6 +268,8 @@ def run_gt_experiment(
 
     assert confusion.shape == (2, 2)
 
+    logging.shutdown()
+
     return indices, confusion, experiment
 
 
