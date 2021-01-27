@@ -41,11 +41,16 @@ def normalize(vectors: np.ndarray) -> np.ndarray:
 
 
 def make_gaussian_rewards(
-    n_rewards: int, use_equiv: bool, mean: Optional[np.ndarray]
+    n_rewards: int,
+    use_equiv: bool,
+    mean: Optional[np.ndarray] = None,
+    cov: Union[np.ndarray, float, None] = None,
 ) -> np.ndarray:
     """ Makes n_rewards uniformly sampled reward vectors of unit length."""
     assert n_rewards > 0
-    dist = multivariate_normal(mean=mean if mean is not None else np.zeros(N_FEATURES))
+    mean = mean if mean is not None else np.zeros(N_FEATURES)
+    dist = multivariate_normal(mean=mean, cov=cov)
+
     rewards = normalize(dist.rvs(size=n_rewards))
     if use_equiv:
         rewards = np.stack(rewards, np.ones(rewards.shape[0]), axis=1)
@@ -62,11 +67,22 @@ def find_reward_boundary(
     assert epsilon >= 0.0
     assert_reward(reward, use_equiv)
 
-    rewards = make_gaussian_rewards(n_rewards, use_equiv, reward)
+    cov = 1.0
 
+    rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
     normals = normals[reward @ normals.T > epsilon]
-
     ground_truth_alignment = np.all(rewards @ normals.T > 0, axis=1)
+    mean_agree = np.mean(ground_truth_alignment)
+
+    while mean_agree > 0.55 or mean_agree < 0.45:
+        if mean_agree > 0.55:
+            cov *= 1.1
+        else:
+            cov /= 1.1
+        rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
+        normals = normals[reward @ normals.T > epsilon]
+        ground_truth_alignment = np.all(rewards @ normals.T > 0, axis=1)
+        mean_agree = np.mean(ground_truth_alignment)
 
     assert ground_truth_alignment.shape == (n_rewards,)
     assert rewards.shape == (n_rewards, N_FEATURES)
@@ -233,6 +249,7 @@ def run_gt_experiment(
     logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n_human_samples}")
 
     # This takes 0.02-0.05 seconds on lovelace
+    # TODO(joschnei): Really need to make this a fixed set common between comparisons.
     rewards, aligned = find_reward_boundary(normals, n_rewards, reward, epsilon, use_equiv)
     logging.info(f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}")
 
