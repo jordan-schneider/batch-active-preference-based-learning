@@ -17,6 +17,9 @@ from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
 from post import TestFactory
+from random_baseline import make_random_questions
+from sampling import Sampler
+from simulation_utils import create_env
 
 N_FEATURES = 4
 
@@ -297,6 +300,22 @@ def make_experiments(
                 yield experiment
 
 
+def make_normals(inputs: np.ndarray, sim):
+    normals = np.empty(shape=(inputs.shape[0], sim.num_of_features))
+    input_features = np.empty(shape=(inputs.shape[0], 2, sim.num_of_features))
+    for i, (input_a, input_b) in enumerate(inputs):
+        sim.feed(input_a)
+        phi_a = sim.get_features()
+
+        sim.feed(input_b)
+        phi_b = sim.get_features()
+
+        input_features[i] = np.stack((phi_a, phi_b))
+
+        normals[i] = phi_a - phi_b
+    return input_features, normals
+
+
 @arg("--epsilons", nargs="+", type=float)
 @arg("--deltas", nargs="+", type=float)
 @arg("--human-samples", nargs="+", type=int)
@@ -315,6 +334,8 @@ def gt(
     outdir: Path = Path(),
     use_equiv: bool = False,
     use_mean_reward: bool = False,
+    use_random_test_questions: bool = False,
+    n_random_test_questions: Optional[int] = None,
     skip_remove_duplicates: bool = False,
     skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
@@ -352,13 +373,13 @@ def gt(
 
     outdir.mkdir(parents=True, exist_ok=True)
 
-    input_features = np.load(datadir / input_features_name)
-    normals = np.load(datadir / normals_name)
-    preferences = np.load(datadir / preferences_name)
-    reward = np.load(datadir / true_reward_name)
+    elicited_input_features = np.load(datadir / input_features_name)
+    elicited_normals = np.load(datadir / normals_name)
+    elicited_preferences = np.load(datadir / preferences_name)
+    true_reward = np.load(datadir / true_reward_name)
 
     if not use_equiv:
-        assert not np.any(preferences == 0)
+        assert not np.any(elicited_preferences == 0)
 
     flags = pickle.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
@@ -366,7 +387,7 @@ def gt(
 
     factory = TestFactory(
         query_type=query_type,
-        reward_dimension=normals.shape[1],
+        reward_dimension=elicited_normals.shape[1],
         equiv_probability=equiv_probability,
         n_reward_samples=n_model_samples,
         use_mean_reward=use_mean_reward,
@@ -376,21 +397,25 @@ def gt(
         skip_redundancy_filtering=skip_redundancy_filtering,
     )
 
-    assert input_features.shape[0] > 0
-    assert preferences.shape[0] > 0
-    assert normals.shape[0] > 0
-    assert reward.shape == (N_FEATURES,)
+    assert elicited_input_features.shape[0] > 0
+    assert elicited_preferences.shape[0] > 0
+    assert elicited_normals.shape[0] > 0
+    assert true_reward.shape == (N_FEATURES,)
 
     if use_equiv:
-        normals = add_equiv_constraints(preferences, normals, equiv_prob=equiv_probability)
-        reward = np.append(reward, [1])
+        elicited_normals = add_equiv_constraints(
+            elicited_preferences, elicited_normals, equiv_prob=equiv_probability
+        )
+        true_reward = np.append(true_reward, [1])
     else:
         if query_type == "weak":
-            preferences, input_features, normals = remove_equiv(
-                preferences, input_features, normals
+            elicited_preferences, elicited_input_features, elicited_normals = remove_equiv(
+                elicited_preferences, elicited_input_features, elicited_normals
             )
-        normals = (normals.T * preferences).T
-    assert_normals(normals, use_equiv)
+        elicited_normals = (elicited_normals.T * elicited_preferences).T
+    assert_normals(elicited_normals, use_equiv)
+
+    elicited_normals = TestFactory.remove_duplicates(elicited_normals)
 
     confusion_path = outdir / make_outname(
         skip_remove_duplicates,
@@ -414,11 +439,32 @@ def gt(
         epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys())
     )
 
+    if use_random_test_questions:
+        if n_random_test_questions is None:
+            raise ValueError(
+                "Must supply n_random_test_questions if use_random_test_questions is true."
+            )
+
+        mean_reward = get_mean_reward(
+            elicited_input_features, elicited_preferences, flags["M"], query_type, flags["delta"]
+        )
+
+        sim = create_env(flags["task"])
+        inputs = make_random_questions(n_random_test_questions, sim)
+        input_features, normals = make_normals(inputs, sim)
+
+        preferences = mean_reward @ normals > 0
+        normals = (normals.T @ preferences).T
+    else:
+        normals = elicited_normals
+        preferences = elicited_preferences
+        input_features = elicited_input_features
+
     for indices, confusion, experiment in Parallel(n_jobs=-2)(
         delayed(run_gt_experiment)(
             normals,
             n_rewards,
-            reward,
+            true_reward,
             epsilon,
             delta,
             use_equiv,
@@ -435,6 +481,23 @@ def gt(
 
     pickle.dump(confusions, open(confusion_path, "wb"))
     pickle.dump(minimal_tests, open(test_path, "wb"))
+
+
+def get_mean_reward(
+    elicited_input_features: np.ndarray,
+    elicited_preferences: np.ndarray,
+    M: int,
+    query_type: str,
+    delta: float,
+):
+    n_features = elicited_input_features.shape[2]
+    w_sampler = Sampler(n_features)
+    for (a_phi, b_phi), preference in zip(elicited_input_features, elicited_preferences):
+        w_sampler.feed(a_phi, b_phi, [preference])
+    reward_samples, _ = w_sampler.sample_given_delta(M, query_type, delta)
+    mean_reward = np.mean(reward_samples, axis=0)
+    assert len(mean_reward.shape()) == 1 and mean_reward.shape()[0] == n_features
+    return mean_reward
 
 
 @arg("--epsilons", nargs="+", type=float)

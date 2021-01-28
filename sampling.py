@@ -1,3 +1,5 @@
+from typing import Optional
+
 import numpy as np
 
 
@@ -29,7 +31,8 @@ class Sampler:
         else:
             psi = phi_A - phi_B
             return np.log(
-                (np.exp(2 * delta) - 1) / (1 + np.exp(delta + psi.dot(w)) + np.exp(delta - psi.dot(w)) + np.exp(2 * delta))
+                (np.exp(2 * delta) - 1)
+                / (1 + np.exp(delta + psi.dot(w)) + np.exp(delta - psi.dot(w)) + np.exp(2 * delta))
             )
 
     def logprob(self, w, delta=0):
@@ -67,11 +70,19 @@ class Sampler:
         else:
             raise ValueError("There is no query type called " + query_type)
 
-    def sample_given_delta(self, sample_count, query_type, delta, burn=1000, thin=50, step_size=0.1):
+    def sample_given_delta(
+        self,
+        sample_count,
+        query_type,
+        delta: Optional[float] = None,
+        burn=1000,
+        thin=50,
+        step_size=0.1,
+    ):
         assert query_type in ["strict", "weak"], "There is no query type called " + query_type
         if query_type == "strict":
-            delta = 0
-        assert delta >= 0
+            delta = 0.0
+        assert delta is not None and delta >= 0.0
 
         x = np.array([0] * self.phi_num).reshape(1, -1)
         old_logprob = self.logprob(x[0], delta)
@@ -85,4 +96,3 @@ class Sampler:
                 x = np.vstack((x, x[-1]))
         x = x[burn + thin - 1 :: thin]
         return x, delta * np.ones((x.shape[0],))
-

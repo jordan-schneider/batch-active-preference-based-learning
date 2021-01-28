@@ -11,7 +11,12 @@ from simulator import Simulation
 
 
 def get_simulated_feedback(
-    simulation: Simulation, input_A: np.ndarray, input_B: np.ndarray, query_type: str, true_reward: np.ndarray, delta: float
+    simulation: Simulation,
+    input_A: np.ndarray,
+    input_B: np.ndarray,
+    query_type: str,
+    true_reward: np.ndarray,
+    delta: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     simulation.feed(input_A)
     phi_A = np.array(simulation.get_features())
@@ -20,6 +25,8 @@ def get_simulated_feedback(
     if query_type == "weak":
         # TODO(joschnei): Implement weak errors using delta. I think there's a model for this but I can't remember off hand.
         raise NotImplementedError("Simulated weak preferences not implemented.")
+        if delta is None:
+            raise ValueError("Must provide delta when using weak queries.")
     elif query_type == "strict":
         s = 1 if true_reward @ (phi_A - phi_B) > 0 else -1
     else:

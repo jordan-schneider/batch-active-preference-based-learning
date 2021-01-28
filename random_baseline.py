@@ -4,9 +4,9 @@ from pathlib import Path
 
 import fire  # type: ignore
 import numpy as np
-from scipy.linalg import norm
+from scipy.linalg import norm  # type: ignore
 
-from demos import append, load, save_reward, update_inputs
+from elicitation import append, load, save_reward, update_inputs
 from sampling import Sampler
 from simulation_utils import create_env, get_feedback, get_simulated_feedback
 
@@ -29,11 +29,13 @@ def update_response(
     return input_features, normals, preferences
 
 
-def make_questions(n_questions: int, simulation_object) -> np.ndarray:
+def make_random_questions(n_questions: int, simulation_object) -> np.ndarray:
     lower_input_bound = [x[0] for x in simulation_object.feed_bounds]
     upper_input_bound = [x[1] for x in simulation_object.feed_bounds]
     inputs = np.random.uniform(
-        low=2 * lower_input_bound, high=2 * upper_input_bound, size=(n_questions, 2 * simulation_object.feed_size),
+        low=2 * lower_input_bound,
+        high=2 * upper_input_bound,
+        size=(n_questions, 2 * simulation_object.feed_size),
     )
     inputs = np.reshape(inputs, (n_questions, 2, -1))
     return inputs
@@ -87,7 +89,9 @@ def simulated(
         logging.info("Catching up.")
         input_A, input_B = inputs[-1]
 
-        phi_A, phi_B, preference = get_simulated_feedback(simulation_object, input_A, input_B, query_type, true_reward, delta)
+        phi_A, phi_B, preference = get_simulated_feedback(
+            simulation_object, input_A, input_B, query_type, true_reward, delta
+        )
 
         input_features, normals, preferences = update_response(
             input_features, normals, preferences, phi_A, phi_B, preference, outpath
@@ -95,7 +99,9 @@ def simulated(
 
     # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
     new_questions = n_questions - inputs.shape[0] if inputs is not None else n_questions
-    questions = make_questions(n_questions=new_questions, simulation_object=simulation_object)
+    questions = make_random_questions(
+        n_questions=new_questions, simulation_object=simulation_object
+    )
 
     if inputs is not None:
         assert inputs.shape[0] == input_features.shape[0]
@@ -108,7 +114,9 @@ def simulated(
         if inputs.shape[0] % 10 == 0:
             logging.info(f"{inputs.shape[0]} of {n_questions}")
 
-        phi_A, phi_B, preference = get_simulated_feedback(simulation_object, input_A, input_B, query_type, true_reward, delta)
+        phi_A, phi_B, preference = get_simulated_feedback(
+            simulation_object, input_A, input_B, query_type, true_reward, delta
+        )
 
         input_features, normals, preferences = update_response(
             input_features, normals, preferences, phi_A, phi_B, preference, outpath
@@ -168,7 +176,9 @@ def human(
         )
 
     # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
-    questions = make_questions(n_questions=n_questions - inputs.shape[0], simulation_object=simulation_object)
+    questions = make_random_questions(
+        n_questions=n_questions - inputs.shape[0], simulation_object=simulation_object
+    )
 
     if inputs is not None:
         assert inputs.shape[0] == input_features.shape[0]
@@ -198,4 +208,3 @@ def human(
 
 if __name__ == "__main__":
     fire.Fire({"human": human, "simulated": simulated})
-
