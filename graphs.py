@@ -535,11 +535,11 @@ def gt(
     confusion = read_confusion(dir=confusion_path, ablation=ablation)
 
     plot_fpr(confusion, outdir, ablation, style, hue="n")
-    # plot_fnr(confusion, outdir, ablation, style, hue="n")
-    # plot_accuracy(confusion, outdir, ablation, hue="n", style=style)
+    plot_fnr(confusion, outdir, ablation, style, hue="n")
+    plot_accuracy(confusion, outdir, ablation, hue="n", style=style)
 
-    # print("Best accuracy:")
-    # print(confusion[confusion.acc == confusion.acc.max()])
+    print("Best accuracy:")
+    print(confusion[confusion.acc == confusion.acc.max()])
 
 
 def human(
