@@ -415,7 +415,9 @@ def gt(
         elicited_normals = (elicited_normals.T * elicited_preferences).T
     assert_normals(elicited_normals, use_equiv)
 
-    elicited_normals = TestFactory.remove_duplicates(elicited_normals)
+    elicited_normals, _ = TestFactory.remove_duplicates(elicited_normals)
+
+    np.save(outdir / "dedup_normals.npy", elicited_normals)
 
     confusion_path = outdir / make_outname(
         skip_remove_duplicates,
