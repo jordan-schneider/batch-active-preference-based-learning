@@ -498,7 +498,7 @@ def get_mean_reward(
         w_sampler.feed(a_phi, b_phi, [preference])
     reward_samples, _ = w_sampler.sample_given_delta(M, query_type, delta)
     mean_reward = np.mean(reward_samples, axis=0)
-    assert len(mean_reward.shape()) == 1 and mean_reward.shape()[0] == n_features
+    assert len(mean_reward.shape) == 1 and mean_reward.shape[0] == n_features
     return mean_reward
 
 
