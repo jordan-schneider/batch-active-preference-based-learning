@@ -45,7 +45,7 @@ def simulated(
     task: str,
     query_type: str,
     n_questions: int,
-    delta: float = 1.1,
+    equiv_size: float = 1.1,
     reward_iterations: int = 100,
     outdir: Path = Path("data/simulated/random/elicitation"),
     reward_path: Path = Path("data/simulated/true_reward.npy"),
@@ -71,9 +71,8 @@ def simulated(
             "task": task,
             "query_type": query_type,
             "n_questions": n_questions,
-            "delta": delta,
+            "equiv_size": equiv_size,
             "reward_iterations": reward_iterations,
-            "true_reward": true_reward,
         },
         open(outpath / "flags.pkl", "wb"),
     )
@@ -90,7 +89,7 @@ def simulated(
         input_A, input_B = inputs[-1]
 
         phi_A, phi_B, preference = get_simulated_feedback(
-            simulation_object, input_A, input_B, query_type, true_reward, delta
+            simulation_object, input_A, input_B, query_type, true_reward, equiv_size
         )
 
         input_features, normals, preferences = update_response(
@@ -115,7 +114,7 @@ def simulated(
             logging.info(f"{inputs.shape[0]} of {n_questions}")
 
         phi_A, phi_B, preference = get_simulated_feedback(
-            simulation_object, input_A, input_B, query_type, true_reward, delta
+            simulation_object, input_A, input_B, query_type, true_reward, equiv_size
         )
 
         input_features, normals, preferences = update_response(
@@ -124,7 +123,7 @@ def simulated(
 
     save_reward(
         query_type=query_type,
-        true_delta=delta,
+        true_delta=equiv_size,
         w_sampler=Sampler(simulation_object.num_of_features),
         M=reward_iterations,
         outdir=outpath,

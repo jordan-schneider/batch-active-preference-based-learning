@@ -24,10 +24,8 @@ class Sampler:
         phi_B = self.phi_B[i]
         a = self.a[i]
         if a != 0:
-            phi_select = phi_A if a < 0 else phi_B
-            phi_nonsel = phi_B if a < 0 else phi_A
-            psi = phi_nonsel - phi_select
-            return np.log(1 / (1 + np.exp(delta + psi.dot(w))))
+            psi = (phi_A - phi_B) * a
+            return np.log(1 / (1 + np.exp(delta - psi.dot(w))))
         else:
             psi = phi_A - phi_B
             return np.log(

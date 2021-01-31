@@ -12,35 +12,13 @@ import argh  # type: ignore
 import numpy as np
 from argh import arg
 from joblib import Parallel, delayed  # type: ignore
-from numpy.linalg import norm  # type: ignore
 from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
 from post import TestFactory
 from random_baseline import make_random_questions
-from sampling import Sampler
 from simulation_utils import create_env
-
-N_FEATURES = 4
-
-
-def assert_normals(normals: np.ndarray, use_equiv: bool) -> None:
-    """ Asserts the given array is an array of normal vectors defining half space constraints."""
-    shape = normals.shape
-    assert len(shape) == 2, f"shape does not have 2 dimensions:{shape}"
-    # Constant offset constraint adds one dimension to normal vectors.
-    assert shape[1] == N_FEATURES + int(use_equiv)
-
-
-def assert_reward(reward: np.ndarray, use_equiv: bool) -> None:
-    """ Asserts the given array is might be a reward feature vector. """
-    assert reward.shape == (N_FEATURES + int(use_equiv),)
-    assert abs(norm(reward) - 1) < 0.000001
-
-
-def normalize(vectors: np.ndarray) -> np.ndarray:
-    """ Takes in a 2d array of row vectors and ensures each row vector has an L_2 norm of 1."""
-    return (vectors.T / norm(vectors, axis=1)).T
+from utils import assert_normals, assert_reward, get_mean_reward, normalize, orient_normals
 
 
 def make_gaussian_rewards(
@@ -48,10 +26,12 @@ def make_gaussian_rewards(
     use_equiv: bool,
     mean: Optional[np.ndarray] = None,
     cov: Union[np.ndarray, float, None] = None,
+    n_reward_features: int = 4,
 ) -> np.ndarray:
     """ Makes n_rewards uniformly sampled reward vectors of unit length."""
     assert n_rewards > 0
-    mean = mean if mean is not None else np.zeros(N_FEATURES)
+    mean = mean if mean is not None else np.zeros(n_reward_features)
+    cov = cov if cov is not None else np.eye(n_reward_features)
     dist = multivariate_normal(mean=mean, cov=cov)
 
     rewards = normalize(dist.rvs(size=n_rewards))
@@ -74,6 +54,8 @@ def find_reward_boundary(
     assert epsilon >= 0.0
     assert_reward(reward, use_equiv)
 
+    n_reward_features = normals.shape[1]
+
     cov = 1.0
 
     rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
@@ -86,13 +68,14 @@ def find_reward_boundary(
             cov *= 1.1
         else:
             cov /= 1.1
+        assert np.isfinite(cov)
         rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
         normals = normals[reward @ normals.T > epsilon]
         ground_truth_alignment = np.all(rewards @ normals.T > 0, axis=1)
         mean_agree = np.mean(ground_truth_alignment)
 
     assert ground_truth_alignment.shape == (n_rewards,)
-    assert rewards.shape == (n_rewards, N_FEATURES)
+    assert rewards.shape == (n_rewards, n_reward_features)
 
     return rewards, ground_truth_alignment
 
@@ -300,19 +283,22 @@ def make_experiments(
                 yield experiment
 
 
-def make_normals(inputs: np.ndarray, sim):
+def make_normals(inputs: np.ndarray, sim, use_equiv: bool):
+    assert len(inputs.shape) == 3
+    assert inputs.shape[1] == 2
     normals = np.empty(shape=(inputs.shape[0], sim.num_of_features))
     input_features = np.empty(shape=(inputs.shape[0], 2, sim.num_of_features))
     for i, (input_a, input_b) in enumerate(inputs):
         sim.feed(input_a)
-        phi_a = sim.get_features()
+        phi_a = np.array(sim.get_features())
 
         sim.feed(input_b)
-        phi_b = sim.get_features()
+        phi_b = np.array(sim.get_features())
 
         input_features[i] = np.stack((phi_a, phi_b))
 
         normals[i] = phi_a - phi_b
+    assert_normals(normals, use_equiv)
     return input_features, normals
 
 
@@ -373,6 +359,9 @@ def gt(
 
     outdir.mkdir(parents=True, exist_ok=True)
 
+    if n_random_test_questions is not None:
+        n_random_test_questions = int(n_random_test_questions)
+
     elicited_input_features = np.load(datadir / input_features_name)
     elicited_normals = np.load(datadir / normals_name)
     elicited_preferences = np.load(datadir / preferences_name)
@@ -383,7 +372,7 @@ def gt(
 
     flags = pickle.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
-    equiv_probability = flags["delta"]
+    equiv_probability = flags["equiv_size"]
 
     factory = TestFactory(
         query_type=query_type,
@@ -397,10 +386,12 @@ def gt(
         skip_redundancy_filtering=skip_redundancy_filtering,
     )
 
+    n_reward_features = create_env(flags["task"]).num_of_features
+
     assert elicited_input_features.shape[0] > 0
     assert elicited_preferences.shape[0] > 0
     assert elicited_normals.shape[0] > 0
-    assert true_reward.shape == (N_FEATURES,)
+    assert true_reward.shape == (n_reward_features,)
 
     if use_equiv:
         elicited_normals = add_equiv_constraints(
@@ -448,15 +439,21 @@ def gt(
             )
 
         mean_reward = get_mean_reward(
-            elicited_input_features, elicited_preferences, flags["M"], query_type, flags["delta"]
+            elicited_input_features,
+            elicited_preferences,
+            flags["reward_iterations"],
+            query_type,
+            flags["equiv_size"],
         )
 
         sim = create_env(flags["task"])
         inputs = make_random_questions(n_random_test_questions, sim)
-        input_features, normals = make_normals(inputs, sim)
+        input_features, normals = make_normals(inputs, sim, use_equiv)
 
-        preferences = mean_reward @ normals > 0
-        normals = (normals.T @ preferences).T
+        preferences = normals @ mean_reward > 0
+        assert preferences.shape == (normals.shape[0],)
+        normals = orient_normals(normals, preferences)
+        assert_normals(normals, use_equiv)
     else:
         normals = elicited_normals
         preferences = elicited_preferences
@@ -483,23 +480,6 @@ def gt(
 
     pickle.dump(confusions, open(confusion_path, "wb"))
     pickle.dump(minimal_tests, open(test_path, "wb"))
-
-
-def get_mean_reward(
-    elicited_input_features: np.ndarray,
-    elicited_preferences: np.ndarray,
-    M: int,
-    query_type: str,
-    delta: float,
-):
-    n_features = elicited_input_features.shape[2]
-    w_sampler = Sampler(n_features)
-    for (a_phi, b_phi), preference in zip(elicited_input_features, elicited_preferences):
-        w_sampler.feed(a_phi, b_phi, [preference])
-    reward_samples, _ = w_sampler.sample_given_delta(M, query_type, delta)
-    mean_reward = np.mean(reward_samples, axis=0)
-    assert len(mean_reward.shape) == 1 and mean_reward.shape[0] == n_features
-    return mean_reward
 
 
 @arg("--epsilons", nargs="+", type=float)
@@ -532,7 +512,7 @@ def human(
 
     flags = pickle.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
-    equiv_probability = flags["delta"]
+    equiv_probability = flags["equiv_size"]
 
     factory = TestFactory(
         query_type=query_type,
@@ -552,7 +532,7 @@ def human(
             preferences, input_features, normals = remove_equiv(
                 preferences, input_features, normals
             )
-        normals = (normals.T * preferences).T
+        normals = orient_normals(normals, preferences, use_equiv)
     assert_normals(normals, use_equiv)
 
     test_path = outdir / make_outname(
