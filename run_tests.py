@@ -27,7 +27,7 @@ N_FEATURES = 4
 def assert_normals(normals: np.ndarray, use_equiv: bool) -> None:
     """ Asserts the given array is an array of normal vectors defining half space constraints."""
     shape = normals.shape
-    assert len(shape) == 2
+    assert len(shape) == 2, f"shape does not have 2 dimensions:{shape}"
     # Constant offset constraint adds one dimension to normal vectors.
     assert shape[1] == N_FEATURES + int(use_equiv)
 
