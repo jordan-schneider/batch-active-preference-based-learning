@@ -82,9 +82,10 @@ class TestFactory:
         out_indices: List[int] = list()
 
         # Remove exact duplicates
-        normals, indices = np.unique(normals, return_index=True, axis=0)
+        _, indices = np.unique(normals, return_index=True, axis=0)
 
-        for i, normal in enumerate(normals):
+
+        for i, normal in enumerate(normals[indices]):
             for accepted_normal in out:
                 if distance.cosine(normal, accepted_normal) < precision:
                     break
