@@ -18,7 +18,8 @@ from sklearn.metrics import confusion_matrix  # type: ignore
 from post import TestFactory
 from random_baseline import make_random_questions
 from simulation_utils import create_env
-from utils import assert_normals, assert_reward, get_mean_reward, normalize, orient_normals
+from utils import (assert_normals, assert_reward, get_mean_reward, normalize,
+                   orient_normals)
 
 
 def make_gaussian_rewards(
@@ -329,7 +330,7 @@ def gt(
     replications: Optional[str] = None,
     overwrite: bool = False,
 ) -> None:
-    """ Run tests with full data to determine how much reward noise gets"""
+    """ Run tests with full data to determine how much reward noise gets """
     logging.basicConfig(level="INFO")
 
     if replications is not None:
@@ -406,9 +407,10 @@ def gt(
         elicited_normals = (elicited_normals.T * elicited_preferences).T
     assert_normals(elicited_normals, use_equiv)
 
-    elicited_normals, _ = TestFactory.remove_duplicates(elicited_normals)
-
-    np.save(outdir / "dedup_normals.npy", elicited_normals)
+    if not skip_remove_duplicates:
+        elicited_normals, _ = TestFactory.remove_duplicates(elicited_normals)
+        logging.info(f"{elicited_normals.shape[0]} questions left after deduplicaiton.")
+        np.save(outdir / "dedup_normals.npy", elicited_normals)
 
     confusion_path = outdir / make_outname(
         skip_remove_duplicates,

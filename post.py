@@ -79,13 +79,17 @@ class TestFactory:
     def remove_duplicates(normals: np.ndarray, precision=0.0001) -> Tuple[np.ndarray, np.ndarray]:
         """ Remove halfspaces that have small cosine similarity to another. """
         out: List[np.ndarray] = list()
-        indices: List[int] = list()
+        out_indices: List[int] = list()
+
+        # Remove exact duplicates
+        normals, indices = np.unique(normals, return_index=True, axis=0)
+
         for i, normal in enumerate(normals):
             for accepted_normal in out:
                 if distance.cosine(normal, accepted_normal) < precision:
                     break
             out.append(normal)
-            indices.append(i)
+            out_indices.append(indices[i])
         return np.array(out).reshape(-1, normals.shape[1]), np.array(indices, dtype=int)
 
     @staticmethod
@@ -146,13 +150,6 @@ class TestFactory:
         b_phis = inputs_features[:, 1]
         filtered_normals = normals
         indices = np.array(range(filtered_normals.shape[0]))
-
-        if not self.skip_remove_duplicates:
-            filtered_normals, indices = self.remove_duplicates(normals)
-
-            logging.info(f"After removing duplicates, there are {len(indices)} questions.")
-
-        assert np.all(normals[indices] == filtered_normals)
 
         if not self.skip_noise_filtering and noise_threshold is not None:
             if rewards is None:
