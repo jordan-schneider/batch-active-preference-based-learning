@@ -69,6 +69,7 @@ def main(datadir: Path) -> None:
     assert input_features.shape == (n_questions, 2, n_reward_features), input_features.shape
 
     normals = np.load(datadir / "normals.npy")
+    logging.info(f"There are {normals.shape[0]} questions")
     assert_normals(normals, use_equiv, n_reward_features)
 
     preferences = np.load(datadir / "preferences.npy")
