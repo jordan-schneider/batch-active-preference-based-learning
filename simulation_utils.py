@@ -75,11 +75,11 @@ def create_env(task):
         raise ValueError("There is no task called " + task)
 
 
-def run_algo(criterion, simulation_object, w_samples, delta_samples):
+def run_algo(criterion, simulation_object, w_samples, delta_samples, continuous: bool = False):
     if criterion == "information":
-        return algos.information(simulation_object, w_samples, delta_samples)
+        return algos.information(simulation_object, w_samples, delta_samples, continuous)
     if criterion == "volume":
-        return algos.volume(simulation_object, w_samples, delta_samples)
+        return algos.volume(simulation_object, w_samples, delta_samples, continuous)
     elif criterion == "random":
         return algos.random(simulation_object)
     else:
