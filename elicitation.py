@@ -70,6 +70,8 @@ def setup(task: str, criterion: str, query_type: str, outdir: Path, delta: Optio
     criterion = criterion.lower()
     query_type = query_type.lower()
     outpath = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
     assert criterion == "information" or criterion == "volume" or criterion == "random", (
         "There is no criterion called " + criterion
     )
@@ -91,8 +93,6 @@ def simulated(
         task, criterion, query_type, outdir, delta=equiv_size
     )
 
-    outdir.mkdir(parents=True, exist_ok=True)
-
     simulation_object = create_env(task)
     d = simulation_object.num_of_features
 
@@ -109,8 +109,8 @@ def simulated(
             "criterion": criterion,
             "query_type": query_type,
             "epsilon": termination_threshold,
-            "M": n_reward_samples,
-            "delta": equiv_size,
+            "reward_iterations": n_reward_samples,
+            "equiv_size": equiv_size,
         },
         open(outdir / "flags.pkl", "wb"),
     )
@@ -136,9 +136,12 @@ def simulated(
             input_A, input_B, score = run_algo(
                 criterion, simulation_object, w_samples, delta_samples
             )
+            logging.info(f"Score={score}")
 
             if score > termination_threshold:
-                update_inputs(a_inputs=input_A, b_inputs=input_B, inputs=inputs, outdir=outdir)
+                inputs = update_inputs(
+                    a_inputs=input_A, b_inputs=input_B, inputs=inputs, outdir=outdir
+                )
                 phi_A, phi_B, preference = get_simulated_feedback(
                     simulation=simulation_object,
                     input_A=input_A,
@@ -211,7 +214,9 @@ def human(
             )
 
             if score > epsilon:
-                update_inputs(a_inputs=input_A, b_inputs=input_B, inputs=inputs, outdir=outdir)
+                inputs = update_inputs(
+                    a_inputs=input_A, b_inputs=input_B, inputs=inputs, outdir=outdir
+                )
                 phi_A, phi_B, preference = get_feedback(
                     simulation_object, input_A, input_B, query_type
                 )

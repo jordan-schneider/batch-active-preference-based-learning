@@ -6,6 +6,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from utils import orient_normals
+
 
 def main(
     datadir=Path("volume-data/questions"),
@@ -19,13 +21,9 @@ def main(
         reward = np.load(datadir / str(replication) / reward_name)
         questions = np.load(datadir / str(replication) / questions_name)
         preferences = np.load(datadir / str(replication) / preferences_name)
-        normals = (questions.T * preferences).T
+        normals = orient_normals(questions, preferences)
         true_value_gap = normals @ reward
-        gaps = (
-            np.concatenate((gaps, true_value_gap))
-            if gaps is not None
-            else true_value_gap
-        )
+        gaps = np.concatenate((gaps, true_value_gap)) if gaps is not None else true_value_gap
 
     print(f"Mean reward gap: {np.mean(gaps)} ({np.std(gaps)})")
     print(f"20/80th percentiles: {np.percentile(gaps, 5)}, {np.percentile(gaps, 95)}")
