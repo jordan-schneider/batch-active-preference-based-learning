@@ -1,5 +1,6 @@
 import logging
 import pickle
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
 
@@ -7,8 +8,7 @@ import fire  # type: ignore
 import numpy as np
 
 from sampling import Sampler
-from simulation_utils import (create_env, get_feedback, get_simulated_feedback,
-                              run_algo)
+from simulation_utils import create_env, get_feedback, get_simulated_feedback, run_algo
 
 
 def load(outdir: Path, filename: str, overwrite: bool) -> Optional[np.ndarray]:
@@ -79,6 +79,10 @@ def setup(task: str, criterion: str, query_type: str, outdir: Path, delta: Optio
     query_type = query_type.lower()
     outpath = Path(outdir)
     outpath.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now()
+
+    logging.basicConfig(level="INFO", filename=outpath / f"{now}.log")
 
     assert criterion == "information" or criterion == "volume" or criterion == "random", (
         "There is no criterion called " + criterion
