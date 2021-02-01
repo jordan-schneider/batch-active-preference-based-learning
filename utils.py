@@ -4,6 +4,10 @@ from numpy.linalg import norm
 from sampling import Sampler
 
 
+def assert_nonempty(*arrs) -> None:
+    for arr in arrs:
+        assert len(arr) > 0
+
 def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int = 4) -> None:
     """ Asserts the given array is an array of normal vectors defining half space constraints."""
     shape = normals.shape

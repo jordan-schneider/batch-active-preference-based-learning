@@ -20,7 +20,6 @@ class TestFactory:
         deterministic: bool = False,
         n_reward_samples: Optional[int] = None,
         use_mean_reward: bool = False,
-        skip_remove_duplicates: bool = False,
         skip_noise_filtering: bool = False,
         skip_epsilon_filtering: bool = False,
         skip_redundancy_filtering: bool = False,
@@ -41,8 +40,6 @@ class TestFactory:
             n_reward_samples (Optional[int], optional): How many rewards to sample when computing
                                                         the posterior. Ignored if determinstic is
                                                         True. Defaults to None.
-            skip_remove_duplicates (bool, optional): Skips the duplicate removal filtering step.
-                                                     Defaults to False.
             skip_noise_filtering (bool, optional): Skips the noise filtering step. Defaults to False.
             skip_epsilon_filtering (bool, optional): Skips the epsilon-delta filtering step.
                                                      Defaults to False.
@@ -55,7 +52,6 @@ class TestFactory:
         self.equiv_probability = equiv_probability
         self.deterministic = deterministic
         self.use_mean_reward = use_mean_reward
-        self.skip_remove_duplicates = skip_remove_duplicates
         self.skip_noise_filtering = skip_noise_filtering
         self.skip_epsilon_filtering = skip_epsilon_filtering
         self.skip_redundancy_filtering = skip_redundancy_filtering
@@ -83,7 +79,6 @@ class TestFactory:
 
         # Remove exact duplicates
         _, indices = np.unique(normals, return_index=True, axis=0)
-
 
         for i, normal in enumerate(normals[indices]):
             for accepted_normal in out:

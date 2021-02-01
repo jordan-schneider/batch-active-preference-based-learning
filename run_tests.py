@@ -18,8 +18,14 @@ from sklearn.metrics import confusion_matrix  # type: ignore
 from post import TestFactory
 from random_baseline import make_random_questions
 from simulation_utils import create_env
-from utils import (assert_normals, assert_reward, get_mean_reward, normalize,
-                   orient_normals)
+from utils import (
+    assert_nonempty,
+    assert_normals,
+    assert_reward,
+    get_mean_reward,
+    normalize,
+    orient_normals,
+)
 
 
 def make_gaussian_rewards(
@@ -129,6 +135,30 @@ def make_outname(
         outname += ".skip_lp"
     outname += ".pkl"
     return outname
+
+
+def make_outnames(
+    outdir: Path,
+    skip_remove_duplicates: bool,
+    skip_noise_filtering: bool,
+    skip_epsilon_filtering: bool,
+    skip_redundancy_filtering: bool,
+) -> Tuple[Path, Path]:
+    confusion_path = outdir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="confusion",
+    )
+    test_path = outdir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="indices",
+    )
+    return confusion_path, test_path
 
 
 def remove_equiv(preferences: np.ndarray, *arrays: np.ndarray) -> Tuple[np.ndarray, ...]:
@@ -244,7 +274,6 @@ def run_gt_experiment(
 
     logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n_human_samples}")
 
-    # This takes 0.02-0.05 seconds on lovelace
     # TODO(joschnei): Really need to make this a fixed set common between comparisons.
     rewards, aligned = find_reward_boundary(normals, n_rewards, reward, epsilon, use_equiv)
     logging.info(f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}")
@@ -301,6 +330,38 @@ def make_normals(inputs: np.ndarray, sim, use_equiv: bool):
         normals[i] = phi_a - phi_b
     assert_normals(normals, use_equiv)
     return input_features, normals
+
+
+def dedup(
+    normals: np.ndarray, preferences: np.ndarray, input_features: np.ndarray, outdir: Path
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    dedup_normals, indices = TestFactory.remove_duplicates(normals)
+    assert np.all(normals[indices] == dedup_normals)
+    normals = dedup_normals
+    preferences = preferences[indices]
+    input_features = input_features[indices]
+    logging.info(f"{normals.shape[0]} questions left after deduplicaiton.")
+    np.save(outdir / "dedup_normals.npy", normals)
+    np.save(outdir / "dedup_preferences.npy", preferences)
+    np.save(outdir / "dedup_input_features.npy", input_features)
+    return normals, preferences, input_features
+
+
+def load_elicitation(
+    datadir: Path,
+    normals_name: Path,
+    preferences_name: Path,
+    input_features_name: Path,
+    n_reward_features: int,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    normals = np.load(datadir / normals_name)
+    preferences = np.load(datadir / preferences_name)
+    input_features = np.load(datadir / input_features_name)
+
+    assert_normals(normals, False, n_reward_features)
+
+    assert_nonempty(normals, preferences, input_features)
+    return normals, preferences, input_features
 
 
 @arg("--epsilons", nargs="+", type=float)
@@ -361,19 +422,23 @@ def gt(
     outdir.mkdir(parents=True, exist_ok=True)
 
     if n_random_test_questions is not None:
+        # Fire parses this as a string for some reason????
         n_random_test_questions = int(n_random_test_questions)
-
-    elicited_input_features = np.load(datadir / input_features_name)
-    elicited_normals = np.load(datadir / normals_name)
-    elicited_preferences = np.load(datadir / preferences_name)
-    true_reward = np.load(datadir / true_reward_name)
-
-    if not use_equiv:
-        assert not np.any(elicited_preferences == 0)
 
     flags = pickle.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
     equiv_probability = flags["equiv_size"]
+    sim = create_env(flags["task"])
+    n_reward_features = sim.num_of_features
+
+    elicited_normals, elicited_preferences, elicited_input_features = load_elicitation(
+        datadir, normals_name, preferences_name, input_features_name, n_reward_features
+    )
+    true_reward = np.load(datadir / true_reward_name)
+    assert_reward(true_reward, False, n_reward_features)
+
+    if not use_equiv:
+        assert not np.any(elicited_preferences == 0)
 
     factory = TestFactory(
         query_type=query_type,
@@ -381,18 +446,10 @@ def gt(
         equiv_probability=equiv_probability,
         n_reward_samples=n_model_samples,
         use_mean_reward=use_mean_reward,
-        skip_remove_duplicates=skip_remove_duplicates,
         skip_noise_filtering=skip_noise_filtering,
         skip_epsilon_filtering=skip_epsilon_filtering,
         skip_redundancy_filtering=skip_redundancy_filtering,
     )
-
-    n_reward_features = create_env(flags["task"]).num_of_features
-
-    assert elicited_input_features.shape[0] > 0
-    assert elicited_preferences.shape[0] > 0
-    assert elicited_normals.shape[0] > 0
-    assert true_reward.shape == (n_reward_features,)
 
     if use_equiv:
         elicited_normals = add_equiv_constraints(
@@ -404,29 +461,20 @@ def gt(
             elicited_preferences, elicited_input_features, elicited_normals = remove_equiv(
                 elicited_preferences, elicited_input_features, elicited_normals
             )
-        elicited_normals = (elicited_normals.T * elicited_preferences).T
     assert_normals(elicited_normals, use_equiv)
 
     if not skip_remove_duplicates:
-        elicited_normals, _ = TestFactory.remove_duplicates(elicited_normals)
-        logging.info(f"{elicited_normals.shape[0]} questions left after deduplicaiton.")
-        np.save(outdir / "dedup_normals.npy", elicited_normals)
+        elicited_normals, elicited_preferences, elicited_input_features = dedup(
+            elicited_normals, elicited_preferences, elicited_input_features, outdir
+        )
 
-    confusion_path = outdir / make_outname(
+    confusion_path, test_path = make_outnames(
+        outdir,
         skip_remove_duplicates,
         skip_noise_filtering,
         skip_epsilon_filtering,
         skip_redundancy_filtering,
-        base="confusion",
     )
-    test_path = outdir / make_outname(
-        skip_remove_duplicates,
-        skip_noise_filtering,
-        skip_epsilon_filtering,
-        skip_redundancy_filtering,
-        base="indices",
-    )
-
     confusions: Dict[Experiment, np.ndarray] = load(confusion_path, overwrite)
     minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
 
@@ -435,31 +483,23 @@ def gt(
     )
 
     if use_random_test_questions:
-        if n_random_test_questions is None:
-            raise ValueError(
-                "Must supply n_random_test_questions if use_random_test_questions is true."
-            )
-
-        mean_reward = get_mean_reward(
+        normals, preferences, input_features = make_random_test(
+            n_random_test_questions,
             elicited_input_features,
             elicited_preferences,
-            flags["reward_iterations"],
-            query_type,
-            flags["equiv_size"],
+            reward_iterations=flags["reward_iterations"],
+            query_type=query_type,
+            equiv_size=flags["equiv_size"],
+            sim=sim,
+            use_equiv=use_equiv,
         )
-
-        sim = create_env(flags["task"])
-        inputs = make_random_questions(n_random_test_questions, sim)
-        input_features, normals = make_normals(inputs, sim, use_equiv)
-
-        preferences = normals @ mean_reward > 0
-        assert preferences.shape == (normals.shape[0],)
-        normals = orient_normals(normals, preferences)
         assert_normals(normals, use_equiv)
     else:
-        normals = elicited_normals
         preferences = elicited_preferences
         input_features = elicited_input_features
+        normals = orient_normals(
+            elicited_normals, elicited_preferences, use_equiv, n_reward_features
+        )
 
     for indices, confusion, experiment in Parallel(n_jobs=-2)(
         delayed(run_gt_experiment)(
@@ -482,6 +522,38 @@ def gt(
 
     pickle.dump(confusions, open(confusion_path, "wb"))
     pickle.dump(minimal_tests, open(test_path, "wb"))
+
+
+def make_random_test(
+    n_random_test_questions: Optional[int],
+    elicited_input_features: np.ndarray,
+    elicited_preferences: np.ndarray,
+    reward_iterations: int,
+    query_type: str,
+    equiv_size: float,
+    sim,
+    use_equiv: bool,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if n_random_test_questions is None:
+        raise ValueError(
+            "Must supply n_random_test_questions if use_random_test_questions is true."
+        )
+    mean_reward = get_mean_reward(
+        elicited_input_features,
+        elicited_preferences,
+        reward_iterations,
+        query_type,
+        equiv_size,
+    )
+    inputs = make_random_questions(n_random_test_questions, sim)
+    input_features, normals = make_normals(inputs, sim, use_equiv)
+    preferences = normals @ mean_reward > 0
+
+    assert preferences.shape == (normals.shape[0],)
+
+    normals = orient_normals(normals, preferences)
+
+    return normals, preferences, input_features
 
 
 @arg("--epsilons", nargs="+", type=float)
@@ -507,21 +579,22 @@ def human(
     skip_redundancy_filtering: bool = False,
     overwrite: bool = False,
 ):
-    input_features = np.load(datadir / input_features_name)
-    normals = np.load(datadir / normals_name)
-    preferences = np.load(datadir / preferences_name)
-    assert preferences.shape[0] > 0
-
     flags = pickle.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
     equiv_probability = flags["equiv_size"]
+    sim = create_env(flags["task"])
+    n_reward_features = sim.num_of_features
+
+    normals, preferences, input_features = load_elicitation(
+        datadir, normals_name, preferences_name, input_features_name, n_reward_features
+    )
+    assert preferences.shape[0] > 0
 
     factory = TestFactory(
         query_type=query_type,
         reward_dimension=normals.shape[1],
         equiv_probability=equiv_probability,
         n_reward_samples=n_model_samples,
-        skip_remove_duplicates=skip_remove_duplicates,
         skip_noise_filtering=skip_noise_filtering,
         skip_epsilon_filtering=skip_epsilon_filtering,
         skip_redundancy_filtering=skip_redundancy_filtering,
