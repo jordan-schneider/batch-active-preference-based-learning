@@ -36,11 +36,19 @@ def assert_normal_consistency(input_features: np.ndarray, normals: np.ndarray) -
     assert np.all(make_normals(input_features) == normals)
 
 
-def assert_true_reward_consistency(
-    normals: np.ndarray, preferences: np.ndarray, true_reward: np.ndarray
-) -> None:
-    oriented_normals = orient_normals(normals, preferences)
-    assert np.all(oriented_normals @ true_reward > 0)
+def assert_true_reward_consistency(oriented_normals: np.ndarray, true_reward: np.ndarray) -> None:
+    gt_value_diff = oriented_normals @ true_reward
+    pref_correct = gt_value_diff >= 0
+    if not np.all(pref_correct):
+        pref_incorrect = np.logical_not(pref_correct)
+        bad_normals = oriented_normals[pref_incorrect]
+        bad_values = gt_value_diff[pref_incorrect]
+        logging.error("Some preferences backwards relative to gt reward.")
+        logging.error(f"The following normals are bad:\n{bad_normals}")
+        logging.error(f"The value difference for these normals were:\n{bad_values}")
+        logging.error(f"The ground truth reward is {true_reward}")
+        logging.error(f"The bad normal indices are {np.where(pref_incorrect)}")
+        assert np.all(pref_correct)
 
 
 def main(datadir: Path) -> None:
@@ -57,11 +65,6 @@ def main(datadir: Path) -> None:
     inputs = np.load(datadir / "inputs.npy")
     n_questions = inputs.shape[0]
     assert inputs.shape[1] == 2
-
-    # Mean posterior reward
-    mean_reward = np.load(datadir / "mean_reward.npy")
-    logging.info(mean_reward)
-    assert_reward(mean_reward, use_equiv, n_reward_features)
 
     # Reward featutures of the inptus
     input_features = np.load(datadir / "input_features.npy")
@@ -84,7 +87,12 @@ def main(datadir: Path) -> None:
 
     assert_input_feature_consistency(inputs, input_features, sim)
     assert_normal_consistency(input_features, normals)
-    assert_true_reward_consistency(normals, preferences, true_reward)
+    assert_true_reward_consistency(oriented_normals, true_reward)
+
+    # Mean posterior reward
+    mean_reward = np.load(datadir / "mean_reward.npy")
+    logging.info(mean_reward)
+    assert_reward(mean_reward, use_equiv, n_reward_features)
 
     mean_accuracy = np.mean(oriented_normals @ mean_reward > 0)
     logging.info(f"Accuracy of mean reward function is {mean_accuracy}")

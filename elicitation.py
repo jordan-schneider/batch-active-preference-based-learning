@@ -46,10 +46,7 @@ def save_reward(
 
 
 def update_inputs(
-    a_inputs: np.ndarray,
-    b_inputs: np.ndarray,
-    inputs: np.ndarray,
-    outdir: Path,
+    a_inputs: np.ndarray, b_inputs: np.ndarray, inputs: np.ndarray, outdir: Path
 ) -> np.ndarray:
     """Adds a new pair of input trajectories (a_inputs, b_inputs) to the inputs list and saves it."""
     inputs = append(inputs, np.stack([a_inputs, b_inputs]))
@@ -104,6 +101,7 @@ def simulated(
     overwrite: bool = False,
     n_replications: int = 1,
 ):
+    n_replications = int(n_replications)
     if n_replications > 1:
         Parallel(n_jobs=-2)(
             delayed(simulated)(
@@ -114,7 +112,7 @@ def simulated(
                 n_reward_samples,
                 equiv_size,
                 true_reward_path,
-                outdir / str(i),
+                Path(outdir) / str(i),
                 continuous,
                 overwrite,
             )

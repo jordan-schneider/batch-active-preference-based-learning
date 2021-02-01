@@ -1,12 +1,38 @@
+from pathlib import Path
+
+import fire
 import numpy as np
 from numpy.linalg import norm
 
 from sampling import Sampler
 
 
+def trim(n_questions: int, datadir: Path) -> None:
+    datadir = Path(datadir)
+    normals = np.load(datadir / "normals.npy")
+    input_features = np.load(datadir / "input_features.npy")
+    preferences = np.load(datadir / "preferences.npy")
+    inputs = np.load(datadir / "inputs.npy")
+
+    assert normals.shape[0] == input_features.shape[0]
+    assert normals.shape[0] == preferences.shape[0]
+    assert normals.shape[0] == inputs.shape[0]
+
+    normals = normals[n_questions:]
+    input_features = input_features[n_questions:]
+    preferences = preferences[n_questions:]
+    inputs = inputs[n_questions:]
+
+    np.save(datadir / "normals.npy", normals)
+    np.save(datadir / "input_features.npy", input_features)
+    np.save(datadir / "preferences.npy", preferences)
+    np.save(datadir / "inputs.npy", inputs)
+
+
 def assert_nonempty(*arrs) -> None:
     for arr in arrs:
         assert len(arr) > 0
+
 
 def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int = 4) -> None:
     """ Asserts the given array is an array of normal vectors defining half space constraints."""
@@ -17,7 +43,7 @@ def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int 
 
 
 def assert_reward(
-    reward: np.ndarray, use_equiv: bool, n_reward_features: int = 4, eps: float = 0.000001
+    reward: np.ndarray, use_equiv: bool, n_reward_features: int = 4, eps: float = 0.000_001
 ) -> None:
     """ Asserts the given array is might be a reward feature vector. """
     assert np.all(np.isfinite(reward))
@@ -60,3 +86,7 @@ def get_mean_reward(
     mean_reward = np.mean(reward_samples, axis=0)
     assert len(mean_reward.shape) == 1 and mean_reward.shape[0] == n_features
     return mean_reward
+
+
+if __name__ == "__main__":
+    fire.Fire()
