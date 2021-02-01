@@ -6,6 +6,7 @@ from typing import Optional, Union
 
 import fire  # type: ignore
 import numpy as np
+from joblib.parallel import Parallel, delayed
 
 from sampling import Sampler
 from simulation_utils import create_env, get_feedback, get_simulated_feedback, run_algo
@@ -101,7 +102,26 @@ def simulated(
     outdir: Path = Path("questions"),
     continuous: bool = False,
     overwrite: bool = False,
+    n_replications: int = 1,
 ):
+    if n_replications > 1:
+        Parallel(n_jobs=-2)(
+            delayed(simulated)(
+                task,
+                criterion,
+                query_type,
+                termination_threshold,
+                n_reward_samples,
+                equiv_size,
+                true_reward_path,
+                outdir / str(i),
+                continuous,
+                overwrite,
+            )
+            for i in range(n_replications)
+        )
+        exit()
+
     task, criterion, query_type, outdir = setup(
         task, criterion, query_type, outdir, delta=equiv_size
     )
