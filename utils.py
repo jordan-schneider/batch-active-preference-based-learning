@@ -1,3 +1,4 @@
+import pickle as pkl
 from pathlib import Path
 
 import fire
@@ -5,28 +6,6 @@ import numpy as np
 from numpy.linalg import norm
 
 from sampling import Sampler
-
-
-def trim(n_questions: int, datadir: Path) -> None:
-    datadir = Path(datadir)
-    normals = np.load(datadir / "normals.npy")
-    input_features = np.load(datadir / "input_features.npy")
-    preferences = np.load(datadir / "preferences.npy")
-    inputs = np.load(datadir / "inputs.npy")
-
-    assert normals.shape[0] == input_features.shape[0]
-    assert normals.shape[0] == preferences.shape[0]
-    assert normals.shape[0] == inputs.shape[0]
-
-    normals = normals[n_questions:]
-    input_features = input_features[n_questions:]
-    preferences = preferences[n_questions:]
-    inputs = inputs[n_questions:]
-
-    np.save(datadir / "normals.npy", normals)
-    np.save(datadir / "input_features.npy", input_features)
-    np.save(datadir / "preferences.npy", preferences)
-    np.save(datadir / "inputs.npy", inputs)
 
 
 def assert_nonempty(*arrs) -> None:
@@ -86,6 +65,45 @@ def get_mean_reward(
     mean_reward = np.mean(reward_samples, axis=0)
     assert len(mean_reward.shape) == 1 and mean_reward.shape[0] == n_features
     return mean_reward
+
+
+# Jank functions for directly modifying file output because I wrote a bug and don't want to re-run
+# everything.
+
+
+def flip_prefs(preferences_path: Path) -> None:
+    preferences = np.load(preferences_path)
+    preferences *= -1
+    np.save(preferences_path, preferences)
+
+
+def trim(n_questions: int, datadir: Path) -> None:
+    datadir = Path(datadir)
+    normals = np.load(datadir / "normals.npy")
+    input_features = np.load(datadir / "input_features.npy")
+    preferences = np.load(datadir / "preferences.npy")
+    inputs = np.load(datadir / "inputs.npy")
+
+    assert normals.shape[0] == input_features.shape[0]
+    assert normals.shape[0] == preferences.shape[0]
+    assert normals.shape[0] == inputs.shape[0]
+
+    normals = normals[n_questions:]
+    input_features = input_features[n_questions:]
+    preferences = preferences[n_questions:]
+    inputs = inputs[n_questions:]
+
+    np.save(datadir / "normals.npy", normals)
+    np.save(datadir / "input_features.npy", input_features)
+    np.save(datadir / "preferences.npy", preferences)
+    np.save(datadir / "inputs.npy", inputs)
+
+
+def fix_flags(flags_path: Path):
+    flags = pkl.load(open(flags_path, "rb"))
+    if "equiv_size" not in flags.keys():
+        flags["equiv_size"] = flags["delta"]
+    pkl.dump(flags, open(flags_path, "wb"))
 
 
 if __name__ == "__main__":
