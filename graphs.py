@@ -361,7 +361,8 @@ def get_max_delta(df: pd.DataFrame, target: str):
     df = pd.DataFrame(df)
     df["means"] = (
         df[["n", "epsilon", "delta", target]].groupby(["n", "epsilon", "delta"]).transform("mean")
-    )
+    ).astype(float)
+
     indices = df.groupby(["n", "epsilon"]).means.idxmax().array
     df = df.loc[indices].drop(columns=["means"])
     return df
@@ -589,6 +590,7 @@ def human(
     font_size: int = 33,
     use_dark_background: bool = False,
 ) -> None:
+    outdir = Path(outdir)
     setup_plt(font_size, use_dark_background)
 
     confusion = make_human_confusion(label_path=label_path, prediction_path=prediction_path,)
