@@ -56,9 +56,9 @@ def get_feedback(simulation_object, input_A, input_B, query_type):
         elif selection == "0" and query_type == "weak":
             s = 0
         elif selection == "1":
-            s = -1
-        elif selection == "2":
             s = 1
+        elif selection == "2":
+            s = -1
     return phi_A, phi_B, s
 
 
