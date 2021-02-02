@@ -31,9 +31,10 @@ def closefig(out: Optional[Path] = None, transparent: bool = False):
         plt.close()
 
 
-def make_xaxis():
+def make_xaxis(max_epsilon: float = 1.5):
     # TODO(joschnei): In theory I should be able to specify n_ticks, n_labels, lower, upper and do
     # the math, but it's not worth it.
+    max_epsilon = max_epsilon
     xticks = np.linspace(0, 1.5, 16)
     xlabels = [0.0, "", "", "", "", 0.5, "", "", "", "", 1.0, "", "", "", "", 1.5]
     return xticks, xlabels
@@ -358,7 +359,7 @@ def plot_fnr(
 
 
 def get_max_delta(df: pd.DataFrame, target: str):
-    df = pd.DataFrame(df)
+    df = df.copy()
     df["means"] = (
         df[["n", "epsilon", "delta", target]].groupby(["n", "epsilon", "delta"]).transform("mean")
     ).astype(float)
@@ -379,7 +380,7 @@ def plot_accuracy(
     plt.figure(figsize=(10, 10))
 
     palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis()
+    xticks, xlabels = make_xaxis(df.epsilon.max())
 
     if best_delta:
         df = get_max_delta(df, "acc")
