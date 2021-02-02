@@ -2,7 +2,7 @@ import pickle
 import sys
 from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Union, cast
+from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
 
 import fire  # type: ignore
 import numpy as np
@@ -31,12 +31,14 @@ def closefig(out: Optional[Path] = None, transparent: bool = False):
         plt.close()
 
 
-def make_xaxis(max_epsilon: float = 1.5):
-    # TODO(joschnei): In theory I should be able to specify n_ticks, n_labels, lower, upper and do
-    # the math, but it's not worth it.
-    max_epsilon = max_epsilon
-    xticks = np.linspace(0, 1.5, 16)
-    xlabels = [0.0, "", "", "", "", 0.5, "", "", "", "", 1.0, "", "", "", "", 1.5]
+def make_xaxis(
+    n_labels: int = 5, ticks_per_label: int = 5, lower: float = 0.0, upper: float = 1.5
+) -> Tuple[np.ndarray, List[str]]:
+    n_ticks = (n_labels - 1) * ticks_per_label + 1
+    xticks = np.linspace(lower, upper, n_ticks)
+    xlabels = [""] * n_ticks
+    for i, val in enumerate(xticks[::ticks_per_label]):
+        xlabels[i * ticks_per_label] = str(val)
     return xticks, xlabels
 
 
@@ -266,7 +268,7 @@ def plot_fpr(
     plt.figure(figsize=(10, 10))
 
     palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis()
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
 
     if best_delta:
         df = get_max_delta(df, "fpr")
@@ -320,7 +322,7 @@ def plot_fnr(
     plt.figure(figsize=(10, 10))
 
     palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis()
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
 
     if best_delta:
         df = get_max_delta(df, "fnr")
@@ -380,7 +382,7 @@ def plot_accuracy(
     plt.figure(figsize=(10, 10))
 
     palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis(df.epsilon.max())
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
 
     if best_delta:
         df = get_max_delta(df, "acc")
@@ -397,8 +399,6 @@ def plot_accuracy(
         legend="brief",
         aspect=2,
     )
-
-    g._legend.texts[0].set_text("")
 
     if style == "POSTER":
         plt.xlabel("Value Slack")
@@ -439,7 +439,7 @@ def plot_individual_fpr(
     df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n", n_replications: int = 10,
 ):
     palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis()
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
     rows_per_replication = get_rows_per_replication(df)
     for i in range(1, n_replications + 1):
 
@@ -467,7 +467,7 @@ def plot_individual_fpr(
 
 
 def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n):
-    xticks, xlabels = make_xaxis()
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
     df = df[df.n == n]
     plt.figure(figsize=(10, 10))
 
@@ -485,7 +485,7 @@ def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n):
 
 def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
     palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis()
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
     g = sns.relplot(
         x="epsilon",
         y="tpf",
@@ -513,7 +513,7 @@ def plot_individual_tp(
     df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n", n_replications: int = 10,
 ):
     palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis()
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
     rows_per_replication = get_rows_per_replication(df)
     for i in range(1, n_replications + 1):
         g = sns.relplot(
