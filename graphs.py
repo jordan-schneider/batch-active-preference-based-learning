@@ -254,11 +254,21 @@ def read_replications(rootdir: Path, ablation: str, replications: Optional[int] 
     return df
 
 
-def plot_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, style: Style, hue: str = "n"):
+def plot_fpr(
+    df: pd.DataFrame,
+    rootdir: Path,
+    ablation: str,
+    style: Style,
+    hue: str = "n",
+    best_delta: bool = True,
+):
     plt.figure(figsize=(10, 10))
 
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis()
+
+    if best_delta:
+        df = get_max_delta(df, "fpr")
 
     # TODO(joschnei): The way I was doing this before meant that the different axes had different
     # fonts. Using sns for everything would probalby fix that, but sns is undocumented garbage.
@@ -298,11 +308,21 @@ def plot_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, style: Style, hue: 
     closefig()
 
 
-def plot_fnr(df: pd.DataFrame, rootdir: Path, ablation: str, style: Style, hue: str = "n"):
+def plot_fnr(
+    df: pd.DataFrame,
+    rootdir: Path,
+    ablation: str,
+    style: Style,
+    hue: str = "n",
+    best_delta: bool = True,
+):
     plt.figure(figsize=(10, 10))
 
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis()
+
+    if best_delta:
+        df = get_max_delta(df, "fnr")
 
     g = sns.relplot(
         x="epsilon",
@@ -337,13 +357,31 @@ def plot_fnr(df: pd.DataFrame, rootdir: Path, ablation: str, style: Style, hue: 
     closefig()
 
 
+def get_max_delta(df: pd.DataFrame, target: str):
+    df = pd.DataFrame(df)
+    df["means"] = (
+        df[["n", "epsilon", "delta", target]].groupby(["n", "epsilon", "delta"]).transform("mean")
+    )
+    indices = df.groupby(["n", "epsilon"]).means.idxmax().array
+    df = df.loc[indices].drop(columns=["means"])
+    return df
+
+
 def plot_accuracy(
-    df: pd.DataFrame, rootdir: Path, ablation: str, style: Style, hue: str = "n",
+    df: pd.DataFrame,
+    rootdir: Path,
+    ablation: str,
+    style: Style,
+    hue: str = "n",
+    best_delta: bool = True,
 ):
     plt.figure(figsize=(10, 10))
 
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis()
+
+    if best_delta:
+        df = get_max_delta(df, "acc")
 
     g = sns.relplot(
         x="epsilon",
