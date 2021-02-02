@@ -49,11 +49,7 @@ def make_gaussian_rewards(
 
 
 def find_reward_boundary(
-    normals: np.ndarray,
-    n_rewards: int,
-    reward: np.ndarray,
-    epsilon: float,
-    use_equiv: bool,
+    normals: np.ndarray, n_rewards: int, reward: np.ndarray, epsilon: float, use_equiv: bool,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Generates n_rewards reward vectors and determines which are aligned. """
     assert_normals(normals, use_equiv)
@@ -111,9 +107,7 @@ def eval_test(
         return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
     else:
         return confusion_matrix(
-            y_true=aligned,
-            y_pred=np.ones(aligned.shape, dtype=bool),
-            labels=[False, True],
+            y_true=aligned, y_pred=np.ones(aligned.shape, dtype=bool), labels=[False, True],
         )
 
 
@@ -539,11 +533,7 @@ def make_random_test(
             "Must supply n_random_test_questions if use_random_test_questions is true."
         )
     mean_reward = get_mean_reward(
-        elicited_input_features,
-        elicited_preferences,
-        reward_iterations,
-        query_type,
-        equiv_size,
+        elicited_input_features, elicited_preferences, reward_iterations, query_type, equiv_size,
     )
     inputs = make_random_questions(n_random_test_questions, sim)
     input_features, normals = make_normals(inputs, sim, use_equiv)
@@ -579,6 +569,8 @@ def human(
     skip_redundancy_filtering: bool = False,
     overwrite: bool = False,
 ):
+    outdir.mkdir(parents=True, exist_ok=True)
+
     flags = pickle.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
     equiv_probability = flags["equiv_size"]
