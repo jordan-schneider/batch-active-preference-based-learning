@@ -18,14 +18,8 @@ from sklearn.metrics import confusion_matrix  # type: ignore
 from post import TestFactory
 from random_baseline import make_random_questions
 from simulation_utils import create_env
-from utils import (
-    assert_nonempty,
-    assert_normals,
-    assert_reward,
-    get_mean_reward,
-    normalize,
-    orient_normals,
-)
+from utils import (assert_nonempty, assert_normals, assert_reward,
+                   get_mean_reward, normalize, orient_normals)
 
 
 def make_gaussian_rewards(
@@ -71,7 +65,9 @@ def find_reward_boundary(
             cov *= 1.1
         else:
             cov /= 1.1
-        assert np.isfinite(cov)
+        if not np.isfinite(cov):
+            # TODO(joschnei): Break is a code smell
+            break
         rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
         normals = normals[reward @ normals.T > epsilon]
         ground_truth_alignment = np.all(rewards @ normals.T > 0, axis=1)
