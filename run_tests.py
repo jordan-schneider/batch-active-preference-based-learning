@@ -76,6 +76,7 @@ def find_reward_boundary(
             cov /= 1.1
         if not np.isfinite(cov):
             # TODO(joschnei): Break is a code smell
+            logging.warning(f"cov={cov}, using last good batch of rewards.")
             break
         rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
         normals = normals[reward @ normals.T > epsilon]
@@ -100,9 +101,7 @@ def eval_test(
 ) -> np.ndarray:
     """ Makes a confusion matrix by evaluating a test on the fake rewards. """
     assert rewards.shape[0] == aligned.shape[0]
-
-    for reward in rewards:
-        assert_reward(reward, use_equiv)
+    assert_rewards(rewards, use_equiv)
 
     if normals.shape[0] > 0:
         results = run_test(normals, rewards, use_equiv)
