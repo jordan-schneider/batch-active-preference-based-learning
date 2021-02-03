@@ -7,7 +7,7 @@ import numpy as np
 from joblib import Parallel, delayed  # type: ignore
 from numpy.random import default_rng
 
-from demos import append, load, make_mode_reward
+from elicitation import append, load, make_mode_reward
 from sampling import Sampler
 from simulation_utils import compute_best, create_env
 
@@ -45,6 +45,7 @@ def collect(
         ValueError: Raised if neither test_reward_path or both std and mean_reward_path are specified. The test rewards need to come from somewhere.
     """
     outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
 
     out_rewards = load(outdir, "test_rewards.npy", overwrite=overwrite)
     new_rewards_index = out_rewards.shape[0] if out_rewards is not None else 0
@@ -55,7 +56,9 @@ def collect(
             rewards = np.load(test_reward_path)[new_rewards_index:num_new_rewards]
         elif mean_reward_path is not None and std is not None:
             mean_reward = np.load(mean_reward_path)
-            rewards = default_rng().normal(loc=mean_reward, scale=std, size=(num_new_rewards, *mean_reward.shape))
+            rewards = default_rng().normal(
+                loc=mean_reward, scale=std, size=(num_new_rewards, *mean_reward.shape)
+            )
         elif normals_paths is not None and preferences_paths is not None and std is not None:
             # NOTE(joschnei): This turned out not to work, because the random baseline is poisoning the well
             normals = None
@@ -66,17 +69,26 @@ def collect(
                 normals = append(normals, single_normals, flat=True)
             # TODO(joschnei): These can all be loaded in from flags.pkl, but I'm too lazy for that.
             mean_reward = make_mode_reward(
-                query_type="strict", true_delta=1.1, w_sampler=Sampler(create_env("driver").num_of_features), M=100
+                query_type="strict",
+                true_delta=1.1,
+                w_sampler=Sampler(create_env("driver").num_of_features),
+                n_reward_samples=100,
             )
             assert np.all(np.isfinite(mean_reward))
-            rewards = default_rng().normal(loc=mean_reward, scale=std, size=(num_new_rewards, *mean_reward.shape))
+            rewards = default_rng().normal(
+                loc=mean_reward, scale=std, size=(num_new_rewards, *mean_reward.shape)
+            )
             assert np.all(np.isfinite(rewards))
         elif use_random:
-            rewards = default_rng().normal(loc=0, scale=1, size=(num_new_rewards, create_env("driver").num_of_features))
+            rewards = default_rng().normal(
+                loc=0, scale=1, size=(num_new_rewards, create_env("driver").num_of_features)
+            )
             rewards = rewards / np.linalg.norm(rewards)
         elif use_plausible:
             # Generate uniform rewards with plausible weights i.e. ones with the right sign
-            rewards = default_rng().normal(loc=0, scale=1, size=(num_new_rewards, create_env("driver").num_of_features))
+            rewards = default_rng().normal(
+                loc=0, scale=1, size=(num_new_rewards, create_env("driver").num_of_features)
+            )
             rewards = rewards / np.linalg.norm(rewards)
 
             # See models.py for reward feature details.
@@ -101,7 +113,11 @@ def collect(
     num_new_paths = n_rewards - new_paths_index
 
     if num_new_paths > 0:
-        new_paths = np.array(Parallel(n_jobs=-2)(delayed(make_path)(reward) for reward in out_rewards[new_paths_index:]))
+        new_paths = np.array(
+            Parallel(n_jobs=-2)(
+                delayed(make_path)(reward) for reward in out_rewards[new_paths_index:]
+            )
+        )
         paths = append(paths, new_paths, flat=True)
     else:
         assert paths is not None

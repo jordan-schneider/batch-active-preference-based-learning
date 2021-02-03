@@ -18,8 +18,15 @@ from sklearn.metrics import confusion_matrix  # type: ignore
 from post import TestFactory
 from random_baseline import make_random_questions
 from simulation_utils import create_env
-from utils import (assert_nonempty, assert_normals, assert_reward,
-                   get_mean_reward, normalize, orient_normals)
+from utils import (
+    assert_nonempty,
+    assert_normals,
+    assert_reward,
+    assert_rewards,
+    get_mean_reward,
+    normalize,
+    orient_normals,
+)
 
 
 def make_gaussian_rewards(
@@ -38,6 +45,8 @@ def make_gaussian_rewards(
     rewards = normalize(dist.rvs(size=n_rewards))
     if use_equiv:
         rewards = np.stack(rewards, np.ones(rewards.shape[0]), axis=1)
+
+    assert_rewards(rewards, use_equiv, n_reward_features)
 
     return rewards
 

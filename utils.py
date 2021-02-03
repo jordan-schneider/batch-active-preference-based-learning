@@ -29,6 +29,12 @@ def assert_reward(
     assert reward.shape == (n_reward_features + int(use_equiv),)
     assert abs(norm(reward) - 1) < eps
 
+def assert_rewards(rewards: np.ndarray, use_equiv: bool, n_reward_features: int=4, eps: float = 0.000_001) -> None:
+    assert np.all(np.isfinite(rewards))
+    assert len(rewards.shape) == 2 
+    assert rewards.shape[1] == (n_reward_features + int(use_equiv),)
+    assert np.all(abs(norm(rewards, axis=1) - 1) < eps)
+
 
 def normalize(vectors: np.ndarray) -> np.ndarray:
     """ Takes in a 2d array of row vectors and ensures each row vector has an L_2 norm of 1."""
