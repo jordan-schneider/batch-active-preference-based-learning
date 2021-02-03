@@ -175,7 +175,7 @@ def make_human_confusion(
 
     confusions = []
     for experiment, prediction in predictions.items():
-        epsilon, delta, n = experiment
+        n = experiment[2]
         if n <= 0:
             continue
         confusion = confusion_matrix(y_true=label, y_pred=prediction, labels=[False, True])
@@ -185,24 +185,12 @@ def make_human_confusion(
 
     df = pd.DataFrame(confusions, columns=["epsilon", "delta", "n", "tn", "fp", "fn", "tp"],)
 
-    # idx = pd.MultiIndex.from_tuples(
-    #     confusion_dict.keys(), names=["epsilon", "delta", "n"]
-    # )
-
-    # df = pd.Series(confusion_dict.values(), index=idx).unstack(-1)
-    # df.columns = ["tp", "fp", "fn", "tn"]
-
-    # TODO(joschnei): Factor common confusion stuff out.
     df = df.convert_dtypes()
-
-    # Seaborn tries to convert integer hues into rgb values. So we make them strings.
-    df["fpr"] = df.fp / (df.fp + df.tn)
-    df["tpf"] = df.tp / (df.tp + df.fp + df.tn)
-    df["fnr"] = df.fn / (df.fn + df.tp)
-    df["acc"] = (df.tn + df.tp) / (df.tp + df.fp + df.tn + df.fn)
 
     df = df.sort_values(by="n")
     df["n"] = df["n"].astype(str)
+
+    df = compute_targets(df)
 
     return df
 
@@ -230,12 +218,19 @@ def read_confusion(dir: Path, ablation: str = ""):
     )
     del out["confusion"]
     out.columns = ["epsilon", "delta", "n", "tn", "fp", "fn", "tp"]
-    out["n"] = out["n"].astype(str)
-    out["fpr"] = out.fp / (out.fp + out.tn)
-    out["tpf"] = out.tp / (out.tp + out.fp + out.tn)
-    out["fnr"] = out.fn / (out.fn + out.tp)
-    out["acc"] = (out.tp + out.tn) / (out.tp + out.tn + out.fp + out.fn)
+
+    out = compute_targets(out)
+
     return out
+
+
+def compute_targets(df: pd.DataFrame) -> pd.DataFrame:
+    df["n"] = df["n"].astype(str)
+    df["fpr"] = df.fp / (df.fp + df.tn)
+    df["tpf"] = df.tp / (df.tp + df.fp + df.tn)
+    df["fnr"] = df.fn / (df.fn + df.tp)
+    df["acc"] = (df.tp + df.tn) / (df.tp + df.tn + df.fp + df.fn)
+    return df
 
 
 def read_replications(rootdir: Path, ablation: str, replications: Optional[int] = None):
@@ -249,10 +244,7 @@ def read_replications(rootdir: Path, ablation: str, replications: Optional[int] 
     df = df.convert_dtypes()
 
     # Seaborn tries to convert integer hues into rgb values. So we make them strings.
-    df["n"] = df["n"].astype(str)
-    df["fpr"] = df.fp / (df.fp + df.tn)
-    df["tpf"] = df.tp / (df.tp + df.fp + df.tn)
-    df["fnr"] = df.fn / (df.fn + df.tp)
+    df = compute_targets(df)
 
     return df
 
@@ -308,6 +300,7 @@ def plot_fpr(
         raise ValueError(f"Style {style} not defined.")
 
     plt.savefig(rootdir / ("fpr" + ablation + ".pdf"))
+    plt.savefig(rootdir / ("fpr" + ablation + ".png"))
     closefig()
 
 
@@ -357,6 +350,7 @@ def plot_fnr(
         raise ValueError(f"Style {style} not defined.")
 
     plt.savefig(rootdir / ("fnr" + ablation + ".pdf"))
+    plt.savefig(rootdir / ("fnr" + ablation + ".png"))
     closefig()
 
 
@@ -378,11 +372,18 @@ def plot_accuracy(
     style: Style,
     hue: str = "n",
     best_delta: bool = True,
+    n_labels: int = 5,
+    ticks_per_label: int = 5,
 ):
     plt.figure(figsize=(10, 10))
 
     palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
+    xticks, xlabels = make_xaxis(
+        lower=df.epsilon.min(),
+        upper=df.epsilon.max(),
+        n_labels=n_labels,
+        ticks_per_label=ticks_per_label,
+    )
 
     if best_delta:
         df = get_max_delta(df, "acc")
@@ -428,7 +429,9 @@ def plot_accuracy(
     else:
         raise ValueError(f"Style {style} not defined.")
 
-    closefig(out=rootdir / ("acc" + ablation + ".pdf"), transparent=transparent)
+    plt.savefig(rootdir / ("acc" + ablation + ".pdf"), transparent=transparent)
+    plt.savefig(rootdir / ("acc" + ablation + ".png"), transparent=transparent)
+    closefig()
 
 
 def get_rows_per_replication(df: pd.DataFrame) -> int:
@@ -463,6 +466,7 @@ def plot_individual_fpr(
         )
         plt.ylim((0, 1.01))
         plt.savefig(rootdir / str(i) / ("fpr" + ablation + ".pdf"))
+        plt.savefig(rootdir / str(i) / ("fpr" + ablation + ".png"))
         closefig()
 
 
@@ -480,6 +484,7 @@ def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n):
         ticks=xticks, labels=xlabels,
     )
     plt.savefig(rootdir / ("fpr.largest" + ablation + ".pdf"))
+    plt.savefig(rootdir / ("fpr.largest" + ablation + ".png"))
     closefig()
 
 
@@ -507,6 +512,7 @@ def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
     )
     plt.ylim((0, 1.01))
     plt.savefig(rootdir / ("tp" + ablation + ".pdf"))
+    plt.savefig(rootdir / ("tp" + ablation + ".png"))
 
 
 def plot_individual_tp(
@@ -537,6 +543,7 @@ def plot_individual_tp(
         )
         plt.ylim((0, 1.01))
         plt.savefig(rootdir / str(i) / ("tp" + ablation + ".pdf"))
+        plt.savefig(rootdir / str(i) / ("tp" + ablation + ".png"))
         closefig()
 
 
@@ -563,6 +570,7 @@ def gt(
     style: Union[str, Style],
     confusion_path: Path,
     ablation: str = ".skip_noise",
+    replications: Optional[int] = None,
     font_size: int = 33,
     use_dark_background: bool = False,
 ) -> None:
@@ -572,7 +580,9 @@ def gt(
     confusion_path = Path(outdir)
     style = assert_style(style)
 
-    confusion = read_confusion(dir=confusion_path, ablation=ablation)
+    confusion = read_replications(
+        rootdir=confusion_path, ablation=ablation, replications=replications
+    )
 
     plot_fpr(confusion, outdir, ablation, style, hue="n")
     plot_fnr(confusion, outdir, ablation, style, hue="n")
@@ -595,12 +605,19 @@ def human(
     setup_plt(font_size, use_dark_background)
 
     confusion = make_human_confusion(label_path=label_path, prediction_path=prediction_path,)
-    plot_fpr(confusion, outdir, ablation, style, hue="n")
-    plot_fnr(confusion, outdir, ablation, style, hue="n")
-    plot_accuracy(confusion, outdir, ablation, hue="n", style=style)
+    # plot_fpr(confusion, outdir, ablation, style, hue="n")
+    # plot_fnr(confusion, outdir, ablation, style, hue="n")
+    plot_accuracy(confusion, outdir, ablation, hue="n", style=style, n_labels=6, ticks_per_label=5)
+
+    assert np.any(confusion.acc != 1.0)
+
+    print(confusion.acc.mean())
 
     print("Best accuracy:")
-    print(confusion[confusion.acc == confusion.acc.max()])
+    best_experiments = confusion[confusion.acc == confusion.acc.max()]
+    print(best_experiments)
+    print(best_experiments.epsilon.min())
+    print(best_experiments.epsilon.max())
 
 
 if __name__ == "__main__":
