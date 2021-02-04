@@ -1,3 +1,4 @@
+import logging
 import pickle as pkl
 from pathlib import Path
 
@@ -29,11 +30,24 @@ def assert_reward(
     assert reward.shape == (n_reward_features + int(use_equiv),)
     assert abs(norm(reward) - 1) < eps
 
-def assert_rewards(rewards: np.ndarray, use_equiv: bool, n_reward_features: int=4, eps: float = 0.000_001) -> None:
+
+def assert_rewards(
+    rewards: np.ndarray, use_equiv: bool, n_reward_features: int = 4, eps: float = 0.000_001
+) -> None:
     assert np.all(np.isfinite(rewards))
-    assert len(rewards.shape) == 2 
-    assert rewards.shape[1] == (n_reward_features + int(use_equiv),)
-    assert np.all(abs(norm(rewards, axis=1) - 1) < eps)
+    assert len(rewards.shape) == 2
+    assert rewards.shape[1] == n_reward_features + int(
+        use_equiv
+    ), f"rewards.shape={rewards.shape}, n_reward_features={n_reward_features}, use_equiv={use_equiv}"
+    norm_dist = abs(norm(rewards, axis=1) - 1)
+    norm_errors = norm_dist > eps
+    if np.any(norm_errors):
+        logging.error("Some rewards are not normalized")
+        indices = np.where(norm_errors)
+        logging.error(f"Bad distances:\n{norm_dist[indices]}")
+        logging.error(f"Bad rewards:\n{rewards[indices]}")
+        logging.error(f"Bad indices:\n{indices}")
+        assert not np.any(norm_errors)
 
 
 def normalize(vectors: np.ndarray) -> np.ndarray:

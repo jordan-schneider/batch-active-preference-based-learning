@@ -40,6 +40,7 @@ def make_gaussian_rewards(
     assert n_rewards > 0
     mean = mean if mean is not None else np.zeros(n_reward_features)
     cov = cov if cov is not None else np.eye(n_reward_features)
+    logging.debug(cov)
     dist = multivariate_normal(mean=mean, cov=cov)
 
     rewards = normalize(dist.rvs(size=n_rewards))
@@ -74,7 +75,7 @@ def find_reward_boundary(
             cov *= 1.1
         else:
             cov /= 1.1
-        if not np.isfinite(cov):
+        if not np.isfinite(cov) or cov <= 0.0 or cov >= 100.0:
             # TODO(joschnei): Break is a code smell
             logging.warning(f"cov={cov}, using last good batch of rewards.")
             break
@@ -396,6 +397,9 @@ def gt(
         # TODO(joschnei): Add better error handling for replications strings
         start, stop = replications.split("-")
         for replication in range(int(start), int(stop) + 1):
+            if not (datadir / str(replication)).exists():
+                logging.warning(f"Replication {replication} does not exist, skipping")
+                continue
             gt(
                 epsilons=epsilons,
                 deltas=deltas,

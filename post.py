@@ -57,10 +57,7 @@ class TestFactory:
         self.skip_redundancy_filtering = skip_redundancy_filtering
 
     def sample_rewards(
-        self,
-        a_phis: np.ndarray,
-        b_phis: np.ndarray,
-        preferences: np.ndarray,
+        self, a_phis: np.ndarray, b_phis: np.ndarray, preferences: np.ndarray,
     ) -> np.ndarray:
         """ Samples n_samples rewards via MCMC. """
         w_sampler = Sampler(self.reward_dimension)
@@ -172,7 +169,7 @@ class TestFactory:
             )
             logging.info(f"After epsilon delta filtering there are {len(indices)} questions.")
 
-        if not self.skip_redundancy_filtering and filtered_normals.shape[0] > 0:
+        if not self.skip_redundancy_filtering and filtered_normals.shape[0] > 1:
             # Remove redundant halfspaces
             filtered_normals, constraint_indices = remove_redundant_constraints(filtered_normals)
 
