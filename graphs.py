@@ -51,10 +51,11 @@ def make_palette_maps(experiments: Sequence[Experiment]):
         ns.add(n)
         deltas.add(delta)
 
-    palette = sns.color_palette("muted", max(len(ns), len(deltas)))
+    ns_palette = sns.color_palette("muted", len(ns))
+    deltas_palette = sns.color_palette("muted", len(deltas))
 
-    ns_palette_map = {str(n): palette[i] for i, n in enumerate(sorted(ns))}
-    deltas_palette_map = {delta: palette[i] for i, delta in enumerate(sorted(deltas))}
+    ns_palette_map = {str(n): ns_palette[i] for i, n in enumerate(sorted(ns))}
+    deltas_palette_map = {delta: deltas_palette[i] for i, delta in enumerate(sorted(deltas))}
     return ns_palette_map, deltas_palette_map
 
 
@@ -64,10 +65,10 @@ def get_hue(hue: str, df):
     )
     if hue == "n":
         palette = ns_palette_map
-        hue_order = df["n"].unique()
+        hue_order = np.sort(df.n.astype(int).unique()).astype(str)
     elif hue == "delta":
         palette = deltas_palette_map
-        hue_order = df["delta"].unique()
+        hue_order = df["delta"].astype(float).unique().sort().astype(str)
     else:
         raise ValueError("Hue must be n or delta")
 
@@ -198,7 +199,7 @@ def make_human_confusion(
 # SIMULATIONS
 
 
-def read_confusion(dir: Path, ablation: str = ""):
+def read_confusion(dir: Path, ablation: str = "", max_n: int = -1):
     """ Read dict of confusion matrices. """
     out_dict = pickle.load(open(dir / f"confusion{ablation}.pkl", "rb"))
 
@@ -219,6 +220,9 @@ def read_confusion(dir: Path, ablation: str = ""):
     del out["confusion"]
     out.columns = ["epsilon", "delta", "n", "tn", "fp", "fn", "tp"]
 
+    if max_n > 0:
+        out = out[out.n <= max_n]
+
     out = compute_targets(out)
 
     return out
@@ -233,11 +237,13 @@ def compute_targets(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def read_replications(rootdir: Path, ablation: str, replications: Optional[int] = None):
+def read_replications(
+    rootdir: Path, ablation: str, replications: Optional[int] = None, max_n: int = -1
+):
     df = pd.DataFrame(columns=["epsilon", "n", "tn", "fp", "tp"])
     if replications is not None:
         for replication in range(1, replications + 1):
-            df = df.append(read_confusion(rootdir / str(replication), ablation=ablation))
+            df = df.append(read_confusion(rootdir / str(replication), ablation=ablation), max_n)
     else:
         df = read_confusion(rootdir, ablation=ablation)
 
@@ -259,11 +265,14 @@ def plot_fpr(
 ):
     plt.figure(figsize=(10, 10))
 
-    palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
-
+    df = df[np.isfinite(df.fpr)]
     if best_delta:
         df = get_max_delta(df, "fpr")
+
+    palette, hue_order = get_hue(hue, df)
+    # print(palette)
+    # print(hue_order)
+    # xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
 
     # TODO(joschnei): The way I was doing this before meant that the different axes had different
     # fonts. Using sns for everything would probalby fix that, but sns is undocumented garbage.
@@ -278,18 +287,17 @@ def plot_fpr(
         data=df,
         ci=80,
         hue_order=hue_order,
-        legend=False,
-        # aspect=2,
-        facet_kws={"legend_out": True},
+        legend=True,
+        aspect=2,
     )
-
-    # g._legend.texts[0].set_text("")
 
     if style == "ICML":
         g.set_axis_labels(r"$\epsilon$", "False Positive Rate")
-        g.add_legend(title="")
+        # g.add_legend(title="")
         # plt.ylabel("False Postive Rate")
         # plt.xlabel(r"$\epsilon$")
+        # g.set_xlabels()
+        # g.set_xticklabels(labels=xlabels)
         # plt.xticks(ticks=xticks, labels=xlabels, size="small")
         # plt.ylim((0, 1.01))
     elif style == "POSTER":
@@ -314,11 +322,12 @@ def plot_fnr(
 ):
     plt.figure(figsize=(10, 10))
 
-    palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
-
+    df = df[np.isfinite(df.fnr)]
     if best_delta:
         df = get_max_delta(df, "fnr")
+
+    palette, hue_order = get_hue(hue, df)
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
 
     g = sns.relplot(
         x="epsilon",
@@ -332,8 +341,6 @@ def plot_fnr(
         legend="brief",
         aspect=2,
     )
-
-    g._legend.texts[0].set_text("")
 
     if style == "ICML":
         plt.xlabel(r"$\epsilon$")
@@ -377,6 +384,10 @@ def plot_accuracy(
 ):
     plt.figure(figsize=(10, 10))
 
+    df = df.dropna(subset=["acc"])
+    if best_delta:
+        df = get_max_delta(df, "acc")
+
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis(
         lower=df.epsilon.min(),
@@ -384,9 +395,6 @@ def plot_accuracy(
         n_labels=n_labels,
         ticks_per_label=ticks_per_label,
     )
-
-    if best_delta:
-        df = get_max_delta(df, "acc")
 
     g = sns.relplot(
         x="epsilon",
@@ -571,6 +579,7 @@ def gt(
     confusion_path: Path,
     ablation: str = ".skip_noise",
     replications: Optional[int] = None,
+    max_n: int = -1,
     font_size: int = 33,
     use_dark_background: bool = False,
 ) -> None:
@@ -581,7 +590,7 @@ def gt(
     style = assert_style(style)
 
     confusion = read_replications(
-        rootdir=confusion_path, ablation=ablation, replications=replications
+        rootdir=confusion_path, ablation=ablation, replications=replications, max_n=max_n
     )
 
     plot_fpr(confusion, outdir, ablation, style, hue="n")
@@ -605,13 +614,9 @@ def human(
     setup_plt(font_size, use_dark_background)
 
     confusion = make_human_confusion(label_path=label_path, prediction_path=prediction_path,)
-    # plot_fpr(confusion, outdir, ablation, style, hue="n")
-    # plot_fnr(confusion, outdir, ablation, style, hue="n")
+    plot_fpr(confusion, outdir, ablation, style, hue="n")
+    plot_fnr(confusion, outdir, ablation, style, hue="n")
     plot_accuracy(confusion, outdir, ablation, hue="n", style=style, n_labels=6, ticks_per_label=5)
-
-    assert np.any(confusion.acc != 1.0)
-
-    print(confusion.acc.mean())
 
     print("Best accuracy:")
     best_experiments = confusion[confusion.acc == confusion.acc.max()]
