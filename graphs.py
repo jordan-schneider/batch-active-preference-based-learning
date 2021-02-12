@@ -221,7 +221,7 @@ def read_confusion(dir: Path, ablation: str = "", max_n: int = -1):
     out.columns = ["epsilon", "delta", "n", "tn", "fp", "fn", "tp"]
 
     if max_n > 0:
-        out = out[out.n <= max_n]
+        out = out[out.n.astype(int) <= max_n]
 
     out = compute_targets(out)
 
@@ -229,6 +229,12 @@ def read_confusion(dir: Path, ablation: str = "", max_n: int = -1):
 
 
 def compute_targets(df: pd.DataFrame) -> pd.DataFrame:
+    for col in ("fp", "tp", "fn", "tn"):
+        df[col] = df[col].astype(int)
+
+    for col in ("epsilon", "delta"):
+        df[col] = df[col].astype(float)
+
     df["n"] = df["n"].astype(str)
     df["fpr"] = df.fp / (df.fp + df.tn)
     df["tpf"] = df.tp / (df.tp + df.fp + df.tn)
@@ -240,10 +246,16 @@ def compute_targets(df: pd.DataFrame) -> pd.DataFrame:
 def read_replications(
     rootdir: Path, ablation: str, replications: Optional[int] = None, max_n: int = -1
 ):
-    df = pd.DataFrame(columns=["epsilon", "n", "tn", "fp", "tp"])
+    df = pd.DataFrame(columns=["epsilon", "delta", "n", "tn", "fp", "fn", "tp"])
     if replications is not None:
         for replication in range(1, replications + 1):
-            df = df.append(read_confusion(rootdir / str(replication), ablation=ablation), max_n)
+            print(rootdir)
+            print(replication)
+            print((rootdir / str(replication)).exists())
+            if (rootdir / str(replication)).exists():
+                df = df.append(
+                    read_confusion(rootdir / str(replication), ablation=ablation, max_n=max_n)
+                )
     else:
         df = read_confusion(rootdir, ablation=ablation)
 
@@ -251,6 +263,8 @@ def read_replications(
 
     # Seaborn tries to convert integer hues into rgb values. So we make them strings.
     df = compute_targets(df)
+
+    print(df.shape)
 
     return df
 
@@ -269,14 +283,11 @@ def plot_fpr(
     if best_delta:
         df = get_max_delta(df, "fpr")
 
-    palette, hue_order = get_hue(hue, df)
-    # print(palette)
-    # print(hue_order)
-    # xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
+    # print(np.all(np.isfinite(df.epsilon)))
+    # print(np.all(np.isfinite(df.fpr)))
 
-    # TODO(joschnei): The way I was doing this before meant that the different axes had different
-    # fonts. Using sns for everything would probalby fix that, but sns is undocumented garbage.
-    # Switch to pure matplotlib if you can, and figure out how sns works if you can't.
+    palette, hue_order = get_hue(hue, df)
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
 
     g = sns.relplot(
         x="epsilon",
@@ -287,19 +298,17 @@ def plot_fpr(
         data=df,
         ci=80,
         hue_order=hue_order,
-        legend=True,
+        legend="brief",
         aspect=2,
     )
 
     if style == "ICML":
-        g.set_axis_labels(r"$\epsilon$", "False Positive Rate")
-        # g.add_legend(title="")
-        # plt.ylabel("False Postive Rate")
-        # plt.xlabel(r"$\epsilon$")
-        # g.set_xlabels()
-        # g.set_xticklabels(labels=xlabels)
-        # plt.xticks(ticks=xticks, labels=xlabels, size="small")
-        # plt.ylim((0, 1.01))
+        plt.xlabel(r"$\epsilon$")
+        plt.ylabel("False Positive Rate")
+        plt.xticks(
+            ticks=xticks, labels=xlabels,
+        )
+        plt.ylim((0, 1.01))
     elif style == "POSTER":
         raise NotImplementedError()
     elif style == "NEURIPS":
@@ -363,12 +372,15 @@ def plot_fnr(
 
 def get_max_delta(df: pd.DataFrame, target: str):
     df = df.copy()
+
     df["means"] = (
         df[["n", "epsilon", "delta", target]].groupby(["n", "epsilon", "delta"]).transform("mean")
     ).astype(float)
+    df["max_mean_delta"] = df.groupby(["n", "epsilon"]).means.transform("max")
 
-    indices = df.groupby(["n", "epsilon"]).means.idxmax().array
-    df = df.loc[indices].drop(columns=["means"])
+    df = df[df.means == df.max_mean_delta]
+    df = df.drop(columns=["means", "max_mean_delta"])
+
     return df
 
 
@@ -582,16 +594,24 @@ def gt(
     max_n: int = -1,
     font_size: int = 33,
     use_dark_background: bool = False,
+    skip_easy: bool = True,
 ) -> None:
     setup_plt(font_size, use_dark_background)
 
+    max_n = int(max_n)
+
     outdir = Path(outdir)
-    confusion_path = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    confusion_path = Path(confusion_path)
     style = assert_style(style)
 
     confusion = read_replications(
         rootdir=confusion_path, ablation=ablation, replications=replications, max_n=max_n
     )
+
+    if skip_easy:
+        confusion = confusion[confusion.tp + confusion.fn != 100]
+        confusion = confusion[confusion.tn + confusion.fp != 100]
 
     plot_fpr(confusion, outdir, ablation, style, hue="n")
     plot_fnr(confusion, outdir, ablation, style, hue="n")
