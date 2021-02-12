@@ -283,11 +283,8 @@ def plot_fpr(
     if best_delta:
         df = get_max_delta(df, "fpr")
 
-    # print(np.all(np.isfinite(df.epsilon)))
-    # print(np.all(np.isfinite(df.fpr)))
-
     palette, hue_order = get_hue(hue, df)
-    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
+    xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max(), n_labels=5, ticks_per_label=5)
 
     g = sns.relplot(
         x="epsilon",
