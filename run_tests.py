@@ -6,7 +6,7 @@ import pickle
 from itertools import product
 from math import log
 from pathlib import Path
-from typing import Dict, Generator, List, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, Generator, List, Optional, Sequence, Set, Tuple, Union, cast
 
 import argh  # type: ignore
 import numpy as np
@@ -45,7 +45,7 @@ def make_gaussian_rewards(
 
     rewards = normalize(dist.rvs(size=n_rewards))
     if use_equiv:
-        rewards = np.stack(rewards, np.ones(rewards.shape[0]), axis=1)
+        rewards = np.concatenate((rewards, np.ones((rewards.shape[0], 1))), axis=1)
 
     assert_rewards(rewards, use_equiv, n_reward_features)
 
@@ -53,7 +53,11 @@ def make_gaussian_rewards(
 
 
 def find_reward_boundary(
-    normals: np.ndarray, n_rewards: int, reward: np.ndarray, epsilon: float, use_equiv: bool,
+    normals: np.ndarray,
+    n_rewards: int,
+    reward: np.ndarray,
+    epsilon: float,
+    use_equiv: bool,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Generates n_rewards reward vectors and determines which are aligned. """
     assert_normals(normals, use_equiv)
@@ -67,7 +71,7 @@ def find_reward_boundary(
 
     rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
     normals = normals[reward @ normals.T > epsilon]
-    ground_truth_alignment = np.all(rewards @ normals.T > 0, axis=1)
+    ground_truth_alignment = cast(np.ndarray, np.all(rewards @ normals.T > 0, axis=1))
     mean_agree = np.mean(ground_truth_alignment)
 
     while mean_agree > 0.55 or mean_agree < 0.45:
@@ -81,7 +85,7 @@ def find_reward_boundary(
             break
         rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
         normals = normals[reward @ normals.T > epsilon]
-        ground_truth_alignment = np.all(rewards @ normals.T > 0, axis=1)
+        ground_truth_alignment = cast(np.ndarray, np.all(rewards @ normals.T > 0, axis=1))
         mean_agree = np.mean(ground_truth_alignment)
 
     assert ground_truth_alignment.shape == (n_rewards,)
@@ -93,7 +97,7 @@ def find_reward_boundary(
 def run_test(normals: np.ndarray, test_rewards: np.ndarray, use_equiv: bool) -> np.ndarray:
     """ Returns the predicted alignment of the fake rewards by the normals. """
     assert_normals(normals, use_equiv)
-    results = np.all(np.dot(test_rewards, normals.T) > 0, axis=1)
+    results = cast(np.ndarray, np.all(np.dot(test_rewards, normals.T) > 0, axis=1))
     return results
 
 
@@ -112,7 +116,9 @@ def eval_test(
         return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
     else:
         return confusion_matrix(
-            y_true=aligned, y_pred=np.ones(aligned.shape, dtype=bool), labels=[False, True],
+            y_true=aligned,
+            y_pred=np.ones(aligned.shape, dtype=bool),
+            labels=[False, True],
         )
 
 
@@ -363,10 +369,21 @@ def load_elicitation(
     return normals, preferences, input_features
 
 
+def parse_replications(replications: str) -> Tuple[int, int]:
+    if "-" in replications:
+        start_str, stop_str = replications.split("-")
+        start = int(start_str)
+        stop = int(stop_str)
+    else:
+        start = 0
+        stop = int(replications)
+    return start, stop
+
+
 @arg("--epsilons", nargs="+", type=float)
 @arg("--deltas", nargs="+", type=float)
 @arg("--human-samples", nargs="+", type=int)
-def gt(
+def simulated(
     epsilons: List[float] = [0.0],
     deltas: List[float] = [0.05],
     n_rewards: int = 100,
@@ -394,13 +411,14 @@ def gt(
     logging.basicConfig(level="INFO")
 
     if replications is not None:
-        # TODO(joschnei): Add better error handling for replications strings
-        start, stop = replications.split("-")
+        start, stop = parse_replications(replications)
+
         for replication in range(int(start), int(stop) + 1):
             if not (datadir / str(replication)).exists():
                 logging.warning(f"Replication {replication} does not exist, skipping")
                 continue
-            gt(
+
+            simulated(
                 epsilons=epsilons,
                 deltas=deltas,
                 n_rewards=n_rewards,
@@ -428,7 +446,7 @@ def gt(
     outdir.mkdir(parents=True, exist_ok=True)
 
     if n_random_test_questions is not None:
-        # Fire parses this as a string for some reason????
+        # Fire defaults to parsing something as a string if its optional
         n_random_test_questions = int(n_random_test_questions)
 
     flags = pickle.load(open(datadir / flags_name, "rb"))
@@ -462,11 +480,10 @@ def gt(
             elicited_preferences, elicited_normals, equiv_prob=equiv_probability
         )
         true_reward = np.append(true_reward, [1])
-    else:
-        if query_type == "weak":
-            elicited_preferences, elicited_input_features, elicited_normals = remove_equiv(
-                elicited_preferences, elicited_input_features, elicited_normals
-            )
+    elif query_type == "weak":
+        elicited_preferences, elicited_input_features, elicited_normals = remove_equiv(
+            elicited_preferences, elicited_input_features, elicited_normals
+        )
     assert_normals(elicited_normals, use_equiv)
 
     if not skip_remove_duplicates:
@@ -545,7 +562,11 @@ def make_random_test(
             "Must supply n_random_test_questions if use_random_test_questions is true."
         )
     mean_reward = get_mean_reward(
-        elicited_input_features, elicited_preferences, reward_iterations, query_type, equiv_size,
+        elicited_input_features,
+        elicited_preferences,
+        reward_iterations,
+        query_type,
+        equiv_size,
     )
     inputs = make_random_questions(n_random_test_questions, sim)
     input_features, normals = make_normals(inputs, sim, use_equiv)
@@ -666,4 +687,4 @@ def human(
 
 
 if __name__ == "__main__":
-    argh.dispatch_commands([gt, human])
+    argh.dispatch_commands([simulated, human])
