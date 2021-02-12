@@ -6,7 +6,7 @@ from typing import Optional, Union
 
 import fire  # type: ignore
 import numpy as np
-from joblib.parallel import Parallel, delayed
+from joblib.parallel import Parallel, delayed  # type: ignore
 
 from sampling import Sampler
 from simulation_utils import create_env, get_feedback, get_simulated_feedback, run_algo
@@ -45,9 +45,7 @@ def save_reward(
     )
 
 
-def update_inputs(
-    a_inputs: np.ndarray, b_inputs: np.ndarray, inputs: np.ndarray, outdir: Path
-) -> np.ndarray:
+def update_inputs(a_inputs, b_inputs, inputs: Optional[np.ndarray], outdir: Path) -> np.ndarray:
     """Adds a new pair of input trajectories (a_inputs, b_inputs) to the inputs list and saves it."""
     inputs = append(inputs, np.stack([a_inputs, b_inputs]))
     np.save(outdir / "inputs.npy", inputs)
@@ -147,14 +145,14 @@ def simulated(
         open(outdir / "flags.pkl", "wb"),
     )
 
-    normals: np.ndarray = load(outdir, filename="normals.npy", overwrite=overwrite)
-    preferences: np.ndarray = load(outdir, filename="preferences.npy", overwrite=overwrite)
-    inputs: np.ndarray = load(outdir, filename="inputs.npy", overwrite=overwrite)
-    input_features: np.ndarray = load(outdir, filename="input_features.npy", overwrite=overwrite)
+    normals = load(outdir, filename="normals.npy", overwrite=overwrite)
+    preferences = load(outdir, filename="preferences.npy", overwrite=overwrite)
+    inputs = load(outdir, filename="inputs.npy", overwrite=overwrite)
+    input_features = load(outdir, filename="input_features.npy", overwrite=overwrite)
 
     # If there is already data, feed it to the w_sampler to get the right posterior.
     w_sampler = Sampler(d)
-    if inputs is not None and preferences is not None:
+    if inputs is not None and input_features is not None and preferences is not None:
         for (a_phi, b_phi), preference in zip(input_features, preferences):
             w_sampler.feed(a_phi, b_phi, [preference])
 
@@ -228,13 +226,13 @@ def human(
         open(outdir / "flags.pkl", "wb"),
     )
 
-    normals: np.ndarray = load(outdir, filename="normals.npy", overwrite=overwrite)
-    preferences: np.ndarray = load(outdir, filename="preferences.npy", overwrite=overwrite)
-    inputs: np.ndarray = load(outdir, filename="inputs.npy", overwrite=overwrite)
-    input_features: np.ndarray = load(outdir, filename="input_features.npy", overwrite=overwrite)
+    normals = load(outdir, filename="normals.npy", overwrite=overwrite)
+    preferences = load(outdir, filename="preferences.npy", overwrite=overwrite)
+    inputs = load(outdir, filename="inputs.npy", overwrite=overwrite)
+    input_features = load(outdir, filename="input_features.npy", overwrite=overwrite)
 
     w_sampler = Sampler(d)
-    if inputs is not None and preferences is not None:
+    if inputs is not None and input_features is not None and preferences is not None:
         for (a_phi, b_phi), preference in zip(input_features, preferences):
             w_sampler.feed(a_phi, b_phi, [preference])
 

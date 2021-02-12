@@ -1,6 +1,7 @@
 import logging
 import pickle
 from pathlib import Path
+from typing import Optional
 
 import fire  # type: ignore
 import numpy as np
@@ -12,11 +13,11 @@ from simulation_utils import create_env, get_feedback, get_simulated_feedback
 
 
 def update_response(
-    input_features: np.ndarray,
-    normals: np.ndarray,
-    preferences: np.ndarray,
-    phi_A: np.ndarray,
-    phi_B: np.ndarray,
+    input_features: Optional[np.ndarray],
+    normals: Optional[np.ndarray],
+    preferences: Optional[np.ndarray],
+    phi_A,
+    phi_B,
     preference: int,
     outdir: Path,
 ):
@@ -77,14 +78,18 @@ def simulated(
         open(outpath / "flags.pkl", "wb"),
     )
 
-    normals: np.ndarray = load(outpath, filename="normals.npy", overwrite=overwrite)
-    preferences: np.ndarray = load(outpath, filename="preferences.npy", overwrite=overwrite)
-    inputs: np.ndarray = load(outpath, filename="inputs.npy", overwrite=overwrite)
-    input_features: np.ndarray = load(outpath, filename="input_features.npy", overwrite=overwrite)
+    normals = load(outpath, filename="normals.npy", overwrite=overwrite)
+    preferences = load(outpath, filename="preferences.npy", overwrite=overwrite)
+    inputs = load(outpath, filename="inputs.npy", overwrite=overwrite)
+    input_features = load(outpath, filename="input_features.npy", overwrite=overwrite)
 
     simulation_object = create_env(task)
 
-    if inputs is not None and inputs.shape[0] > input_features.shape[0]:
+    if (
+        inputs is not None
+        and input_features is not None
+        and inputs.shape[0] > input_features.shape[0]
+    ):
         logging.info("Catching up.")
         input_A, input_B = inputs[-1]
 
@@ -103,6 +108,9 @@ def simulated(
     )
 
     if inputs is not None:
+        assert input_features is not None
+        assert normals is not None
+        assert preferences is not None
         assert inputs.shape[0] == input_features.shape[0]
         assert inputs.shape[0] == normals.shape[0]
         assert inputs.shape[0] == preferences.shape[0]
@@ -125,7 +133,7 @@ def simulated(
         query_type=query_type,
         true_delta=equiv_size,
         w_sampler=Sampler(simulation_object.num_of_features),
-        M=reward_iterations,
+        n_reward_samples=reward_iterations,
         outdir=outpath,
     )
 
@@ -157,14 +165,18 @@ def human(
         open(outpath / "flags.pkl", "wb"),
     )
 
-    normals: np.ndarray = load(outpath, filename="normals.npy", overwrite=overwrite)
-    preferences: np.ndarray = load(outpath, filename="preferences.npy", overwrite=overwrite)
-    inputs: np.ndarray = load(outpath, filename="inputs.npy", overwrite=overwrite)
-    input_features: np.ndarray = load(outpath, filename="input_features.npy", overwrite=overwrite)
+    normals = load(outpath, filename="normals.npy", overwrite=overwrite)
+    preferences = load(outpath, filename="preferences.npy", overwrite=overwrite)
+    inputs = load(outpath, filename="inputs.npy", overwrite=overwrite)
+    input_features = load(outpath, filename="input_features.npy", overwrite=overwrite)
 
     simulation_object = create_env(task)
 
-    if inputs is not None and inputs.shape[0] > input_features.shape[0]:
+    if (
+        inputs is not None
+        and input_features is not None
+        and inputs.shape[0] > input_features.shape[0]
+    ):
         logging.info("Catching up.")
         input_A, input_B = inputs[-1]
 
@@ -175,11 +187,15 @@ def human(
         )
 
     # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
+    new_questions = n_questions - inputs.shape[0] if inputs is not None else n_questions
     questions = make_random_questions(
-        n_questions=n_questions - inputs.shape[0], simulation_object=simulation_object
+        n_questions=new_questions, simulation_object=simulation_object
     )
 
     if inputs is not None:
+        assert input_features is not None
+        assert normals is not None
+        assert preferences is not None
         assert inputs.shape[0] == input_features.shape[0]
         assert inputs.shape[0] == normals.shape[0]
         assert inputs.shape[0] == preferences.shape[0]
@@ -200,7 +216,7 @@ def human(
         query_type=query_type,
         true_delta=delta,
         w_sampler=Sampler(simulation_object.num_of_features),
-        M=reward_iterations,
+        n_reward_samples=reward_iterations,
         outdir=outpath,
     )
 
