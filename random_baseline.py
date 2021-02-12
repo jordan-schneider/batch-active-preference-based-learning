@@ -42,30 +42,67 @@ def make_random_questions(n_questions: int, simulation_object) -> np.ndarray:
     return inputs
 
 
-def simulated(
+def make_reward_path(reward_path: Path):
+    reward_path = Path(reward_path)
+
+    if ".npy" in reward_path.name:
+        reward_dir = reward_path.parent
+        reward_name = reward_path.name
+    else:
+        reward_dir = reward_path
+        reward_name = "true_reward.npy"
+
+    reward_dir.mkdir(parents=True, exist_ok=True)
+
+    return reward_dir, reward_name
+
+
+def main(
     task: str,
     query_type: str,
     n_questions: int,
     equiv_size: float = 1.1,
     reward_iterations: int = 100,
     outdir: Path = Path("data/simulated/random/elicitation"),
-    reward_path: Path = Path("data/simulated/true_reward.npy"),
+    human: bool = False,
+    reward_path: Optional[Path] = None,
+    n_replications: Optional[int] = None,
     overwrite: bool = False,
 ) -> None:
-    # TODO(joschnei): Factor most of this out to be common with human. Literally all I changed was loading true_reward and
-    # changing get_feedback to get_simulated_feedback.
     logging.basicConfig(level=logging.INFO)
 
     outpath = Path(outdir)
+
+    if not human:
+        assert reward_path is not None
+        reward_dir, reward_name = make_reward_path(reward_path)
+        reward_path = reward_dir / reward_name
+
+    # TODO(joschnei): I could efficiently parallelize this.
+    if n_replications is not None:
+        for i in range(1, n_replications + 1):
+            main(
+                task=task,
+                query_type=query_type,
+                n_questions=n_questions,
+                equiv_size=equiv_size,
+                reward_iterations=reward_iterations,
+                outdir=outpath / str(i),
+                human=human,
+                reward_path=reward_dir / str(i) / reward_name,
+                overwrite=overwrite,
+            )
+
     outpath.mkdir(parents=True, exist_ok=True)
 
-    reward_path = Path(reward_path)
-    if not reward_path.exists():
-        true_reward = np.random.default_rng().normal(loc=0, scale=1, size=(4,))
-        true_reward = true_reward / norm(true_reward)
-        np.save(reward_path, true_reward)
-    else:
-        true_reward = np.load(reward_path)
+    if not human:
+        assert reward_path is not None
+        if not reward_path.exists():
+            true_reward = np.random.default_rng().normal(loc=0, scale=1, size=(4,))
+            true_reward = true_reward / norm(true_reward)
+            np.save(reward_path, true_reward)
+        else:
+            true_reward = np.load(reward_path)
 
     pickle.dump(
         {
@@ -90,12 +127,15 @@ def simulated(
         and input_features is not None
         and inputs.shape[0] > input_features.shape[0]
     ):
-        logging.info("Catching up.")
+        logging.info("Catching up to previously generated trajectories.")
         input_A, input_B = inputs[-1]
 
-        phi_A, phi_B, preference = get_simulated_feedback(
-            simulation_object, input_A, input_B, query_type, true_reward, equiv_size
-        )
+        if human:
+            phi_A, phi_B, preference = get_feedback(simulation_object, input_A, input_B, query_type)
+        else:
+            phi_A, phi_B, preference = get_simulated_feedback(
+                simulation_object, input_A, input_B, query_type, true_reward, equiv_size
+            )
 
         input_features, normals, preferences = update_response(
             input_features, normals, preferences, phi_A, phi_B, preference, outpath
@@ -121,9 +161,12 @@ def simulated(
         if inputs.shape[0] % 10 == 0:
             logging.info(f"{inputs.shape[0]} of {n_questions}")
 
-        phi_A, phi_B, preference = get_simulated_feedback(
-            simulation_object, input_A, input_B, query_type, true_reward, equiv_size
-        )
+        if human:
+            phi_A, phi_B, preference = get_feedback(simulation_object, input_A, input_B, query_type)
+        else:
+            phi_A, phi_B, preference = get_simulated_feedback(
+                simulation_object, input_A, input_B, query_type, true_reward, equiv_size
+            )
 
         input_features, normals, preferences = update_response(
             input_features, normals, preferences, phi_A, phi_B, preference, outpath
@@ -138,88 +181,5 @@ def simulated(
     )
 
 
-def human(
-    task: str,
-    query_type: str,
-    n_questions: int,
-    delta: float = 1.1,
-    reward_iterations: int = 100,
-    outdir: Path = Path("random_questions"),
-    overwrite: bool = False,
-) -> None:
-    logging.basicConfig(level=logging.INFO)
-
-    outpath = Path(outdir)
-
-    if not outpath.exists():
-        outpath.mkdir()
-
-    pickle.dump(
-        {
-            "task": task,
-            "query_type": query_type,
-            "n_questions": n_questions,
-            "delta": delta,
-            "reward_iterations": reward_iterations,
-        },
-        open(outpath / "flags.pkl", "wb"),
-    )
-
-    normals = load(outpath, filename="normals.npy", overwrite=overwrite)
-    preferences = load(outpath, filename="preferences.npy", overwrite=overwrite)
-    inputs = load(outpath, filename="inputs.npy", overwrite=overwrite)
-    input_features = load(outpath, filename="input_features.npy", overwrite=overwrite)
-
-    simulation_object = create_env(task)
-
-    if (
-        inputs is not None
-        and input_features is not None
-        and inputs.shape[0] > input_features.shape[0]
-    ):
-        logging.info("Catching up.")
-        input_A, input_B = inputs[-1]
-
-        phi_A, phi_B, preference = get_feedback(simulation_object, input_A, input_B, query_type)
-
-        input_features, normals, preferences = update_response(
-            input_features, normals, preferences, phi_A, phi_B, preference, outpath
-        )
-
-    # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
-    new_questions = n_questions - inputs.shape[0] if inputs is not None else n_questions
-    questions = make_random_questions(
-        n_questions=new_questions, simulation_object=simulation_object
-    )
-
-    if inputs is not None:
-        assert input_features is not None
-        assert normals is not None
-        assert preferences is not None
-        assert inputs.shape[0] == input_features.shape[0]
-        assert inputs.shape[0] == normals.shape[0]
-        assert inputs.shape[0] == preferences.shape[0]
-
-    for input_A, input_B in questions:
-        inputs = update_inputs(input_A, input_B, inputs, outpath)
-
-        if inputs.shape[0] % 10 == 0:
-            logging.info(f"{inputs.shape[0]} of {n_questions}")
-
-        phi_A, phi_B, preference = get_feedback(simulation_object, input_A, input_B, query_type)
-
-        input_features, normals, preferences = update_response(
-            input_features, normals, preferences, phi_A, phi_B, preference, outpath
-        )
-
-    save_reward(
-        query_type=query_type,
-        true_delta=delta,
-        w_sampler=Sampler(simulation_object.num_of_features),
-        n_reward_samples=reward_iterations,
-        outdir=outpath,
-    )
-
-
 if __name__ == "__main__":
-    fire.Fire({"human": human, "simulated": simulated})
+    fire.Fire(main)
