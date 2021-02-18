@@ -9,6 +9,21 @@ from numpy.linalg import norm
 from sampling import Sampler
 
 
+def make_reward_path(reward_path: Path):
+    reward_path = Path(reward_path)
+
+    if ".npy" in reward_path.name:
+        reward_dir = reward_path.parent
+        reward_name = reward_path.name
+    else:
+        reward_dir = reward_path
+        reward_name = "true_reward.npy"
+
+    reward_dir.mkdir(parents=True, exist_ok=True)
+
+    return reward_dir, reward_name
+
+
 def assert_nonempty(*arrs) -> None:
     for arr in arrs:
         assert len(arr) > 0

@@ -9,7 +9,9 @@ import numpy as np
 from joblib.parallel import Parallel, delayed  # type: ignore
 
 from sampling import Sampler
-from simulation_utils import create_env, get_feedback, get_simulated_feedback, run_algo
+from simulation_utils import (create_env, get_feedback, get_simulated_feedback,
+                              run_algo)
+from utils import make_reward_path
 
 
 def load(outdir: Path, filename: str, overwrite: bool) -> Optional[np.ndarray]:
@@ -100,22 +102,41 @@ def simulated(
     n_replications: int = 1,
 ):
     n_replications = int(n_replications)
+
     if n_replications > 1:
-        Parallel(n_jobs=-2)(
-            delayed(simulated)(
-                task,
-                criterion,
-                query_type,
-                termination_threshold,
-                n_reward_samples,
-                equiv_size,
-                true_reward_path,
-                Path(outdir) / str(i),
-                continuous,
-                overwrite,
+        if true_reward_path is not None:
+            reward_dir, reward_name = make_reward_path(true_reward_path)
+            Parallel(n_jobs=-2)(
+                delayed(simulated)(
+                    task,
+                    criterion,
+                    query_type,
+                    termination_threshold,
+                    n_reward_samples,
+                    equiv_size,
+                    reward_dir / str(i) / reward_name,
+                    Path(outdir) / str(i),
+                    continuous,
+                    overwrite,
+                )
+                for i in range(1, n_replications+1)
             )
-            for i in range(n_replications)
-        )
+        else:
+            Parallel(n_jobs=-2)(
+                delayed(simulated)(
+                    task,
+                    criterion,
+                    query_type,
+                    termination_threshold,
+                    n_reward_samples,
+                    equiv_size,
+                    true_reward_path,
+                    Path(outdir) / str(i),
+                    continuous,
+                    overwrite,
+                )
+                for i in range(1, n_replications+1)
+            )
         exit()
 
     task, criterion, query_type, outdir = setup(

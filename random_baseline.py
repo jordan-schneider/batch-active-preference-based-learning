@@ -3,13 +3,15 @@ import pickle
 from pathlib import Path
 from typing import Optional
 
-import fire  # type: ignore
+import fire
 import numpy as np
+from joblib.parallel import Parallel, delayed  # type: ignore
 from scipy.linalg import norm  # type: ignore
 
 from elicitation import append, load, save_reward, update_inputs
 from sampling import Sampler
 from simulation_utils import create_env, get_feedback, get_simulated_feedback
+from utils import make_reward_path
 
 
 def update_response(
@@ -42,21 +44,6 @@ def make_random_questions(n_questions: int, simulation_object) -> np.ndarray:
     return inputs
 
 
-def make_reward_path(reward_path: Path):
-    reward_path = Path(reward_path)
-
-    if ".npy" in reward_path.name:
-        reward_dir = reward_path.parent
-        reward_name = reward_path.name
-    else:
-        reward_dir = reward_path
-        reward_name = "true_reward.npy"
-
-    reward_dir.mkdir(parents=True, exist_ok=True)
-
-    return reward_dir, reward_name
-
-
 def main(
     task: str,
     query_type: str,
@@ -80,8 +67,8 @@ def main(
 
     # TODO(joschnei): I could efficiently parallelize this.
     if n_replications is not None:
-        for i in range(1, n_replications + 1):
-            main(
+        Parallel(n_jobs=-2)(
+            delayed(main)(
                 task=task,
                 query_type=query_type,
                 n_questions=n_questions,
@@ -92,12 +79,16 @@ def main(
                 reward_path=reward_dir / str(i) / reward_name,
                 overwrite=overwrite,
             )
+            for i in range(1, n_replications + 1)
+        )
+        exit()
 
     outpath.mkdir(parents=True, exist_ok=True)
 
     if not human:
         assert reward_path is not None
         if not reward_path.exists():
+            logging.info("Reward path given does not exist, generating random reward.")
             true_reward = np.random.default_rng().normal(loc=0, scale=1, size=(4,))
             true_reward = true_reward / norm(true_reward)
             np.save(reward_path, true_reward)
