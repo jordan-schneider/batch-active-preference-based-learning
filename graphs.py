@@ -321,9 +321,11 @@ def plot_fpr(
         plt.xlabel(r"$\epsilon$")
         plt.ylabel("False Positive Rate")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
+        transparent = False
     elif style == "POSTER":
         plt.xlabel("Value Slack")
         plt.ylabel("False Positive Rate")
