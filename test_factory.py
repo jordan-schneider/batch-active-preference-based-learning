@@ -6,9 +6,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 from scipy.spatial import distance  # type: ignore
 
+from active.sampling import Sampler
 from linear_programming import remove_redundant_constraints
-from sampling import Sampler
-from simulation_utils import create_env
 
 
 class TestFactory:
@@ -57,7 +56,10 @@ class TestFactory:
         self.skip_redundancy_filtering = skip_redundancy_filtering
 
     def sample_rewards(
-        self, a_phis: np.ndarray, b_phis: np.ndarray, preferences: np.ndarray,
+        self,
+        a_phis: np.ndarray,
+        b_phis: np.ndarray,
+        preferences: np.ndarray,
     ) -> np.ndarray:
         """ Samples n_samples rewards via MCMC. """
         w_sampler = Sampler(self.reward_dimension)

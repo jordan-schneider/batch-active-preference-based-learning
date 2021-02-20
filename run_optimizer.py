@@ -1,8 +1,11 @@
-from simulation_utils import create_env, compute_best, play
 import sys
 
+from active.simulation_utils import compute_best, create_env, play
+
 task = sys.argv[1].lower()
-iter_count = int(sys.argv[2]) # the optimization is nonconvex, so you can specify the number of random starting points
+iter_count = int(
+    sys.argv[2]
+)  # the optimization is nonconvex, so you can specify the number of random starting points
 w = [float(x) for x in sys.argv[3:]]
 
 ##### YOU DO NOT NEED TO MODIFY THE CODE BELOW THIS LINE #####

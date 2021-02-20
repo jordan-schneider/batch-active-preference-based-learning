@@ -6,8 +6,8 @@ from pathlib import Path
 import fire  # type: ignore
 import numpy as np
 
-from simulation_utils import create_env
-from utils import assert_normals, assert_reward, get_mean_reward, orient_normals
+from active.simulation_utils import create_env
+from utils import assert_normals, assert_reward, orient_normals
 
 
 def make_normals(input_features: np.ndarray) -> np.ndarray:

@@ -3,14 +3,14 @@ import pickle
 from pathlib import Path
 from typing import Optional
 
-import fire
+import fire  # type: ignore
 import numpy as np
 from joblib.parallel import Parallel, delayed  # type: ignore
 from scipy.linalg import norm  # type: ignore
 
+from active.sampling import Sampler
+from active.simulation_utils import create_env, get_feedback, get_simulated_feedback
 from elicitation import append, load, save_reward, update_inputs
-from sampling import Sampler
-from simulation_utils import create_env, get_feedback, get_simulated_feedback
 from utils import make_reward_path
 
 

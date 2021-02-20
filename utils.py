@@ -2,11 +2,11 @@ import logging
 import pickle as pkl
 from pathlib import Path
 
-import fire
+import fire  # type: ignore
 import numpy as np
 from numpy.linalg import norm
 
-from sampling import Sampler
+from active.sampling import Sampler
 
 
 def make_reward_path(reward_path: Path):

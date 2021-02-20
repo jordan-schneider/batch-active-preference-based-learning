@@ -1,6 +1,5 @@
 import pickle
 import sys
-from enum import Enum, auto
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
 

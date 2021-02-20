@@ -15,9 +15,9 @@ from joblib import Parallel, delayed  # type: ignore
 from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
-from post import TestFactory
+from active.simulation_utils import create_env
 from random_baseline import make_random_questions
-from simulation_utils import create_env
+from test_factory import TestFactory
 from utils import (
     assert_nonempty,
     assert_normals,

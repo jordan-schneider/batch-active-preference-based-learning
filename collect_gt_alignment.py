@@ -7,9 +7,9 @@ import numpy as np
 from joblib import Parallel, delayed  # type: ignore
 from numpy.random import default_rng
 
+from active.sampling import Sampler
+from active.simulation_utils import compute_best, create_env
 from elicitation import append, load, make_mode_reward
-from sampling import Sampler
-from simulation_utils import compute_best, create_env
 
 
 def make_path(reward: np.ndarray) -> np.ndarray:

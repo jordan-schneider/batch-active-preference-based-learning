@@ -8,9 +8,8 @@ import fire  # type: ignore
 import numpy as np
 from joblib.parallel import Parallel, delayed  # type: ignore
 
-from sampling import Sampler
-from simulation_utils import (create_env, get_feedback, get_simulated_feedback,
-                              run_algo)
+from active.sampling import Sampler
+from active.simulation_utils import create_env, get_feedback, get_simulated_feedback, run_algo
 from utils import make_reward_path
 
 
@@ -119,7 +118,7 @@ def simulated(
                     continuous,
                     overwrite,
                 )
-                for i in range(1, n_replications+1)
+                for i in range(1, n_replications + 1)
             )
         else:
             Parallel(n_jobs=-2)(
@@ -135,7 +134,7 @@ def simulated(
                     continuous,
                     overwrite,
                 )
-                for i in range(1, n_replications+1)
+                for i in range(1, n_replications + 1)
             )
         exit()
 

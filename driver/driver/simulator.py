@@ -1,4 +1,3 @@
-import os
 import time
 from typing import Any
 
@@ -6,12 +5,8 @@ import gym
 import numpy as np
 from mujoco_py import MjSim, MjViewer, load_model_from_path
 
-import car
-import dynamics
-import fetch_gym
-import lane
-import visualize
-from world import World
+from driver import car, dynamics, lane, visualize
+from driver.world import World
 
 
 class Simulation(object):
@@ -50,7 +45,9 @@ class Simulation(object):
 
 class LDSSimulation(Simulation):
     def __init__(self, name, total_time=25, recording_time=[0, 25]):
-        super(LDSSimulation, self).__init__(name, total_time=total_time, recording_time=recording_time)
+        super(LDSSimulation, self).__init__(
+            name, total_time=total_time, recording_time=recording_time
+        )
         self.initial_state = np.array([0, 0, 0, 0, 0, 0], dtype=np.float32)
         self.input_size = 3
         self.reset()
@@ -93,7 +90,9 @@ class LDSSimulation(Simulation):
 
 class DrivingSimulation(Simulation):
     def __init__(self, name, total_time=50, recording_time=[0, 50]):
-        super(DrivingSimulation, self).__init__(name, total_time=total_time, recording_time=recording_time)
+        super(DrivingSimulation, self).__init__(
+            name, total_time=total_time, recording_time=recording_time
+        )
         self.world = World()
         clane = lane.StraightLane([0.0, -1.0], [0.0, 1.0], 0.17)
         self.world.lanes += [clane, clane.shifted(1), clane.shifted(-1)]
@@ -167,7 +166,8 @@ class DrivingSimulation(Simulation):
             self.viewer.paused = True
         for _ in range(repeat_count):
             self.viewer.run_modified(
-                history_x=[self.robot_history_x, self.human_history_x], history_u=[self.robot_history_u, self.human_history_u]
+                history_x=[self.robot_history_x, self.human_history_x],
+                history_u=[self.robot_history_u, self.human_history_u],
             )
         self.viewer.window.close()
         self.viewer = None
@@ -175,7 +175,9 @@ class DrivingSimulation(Simulation):
 
 class MujocoSimulation(Simulation):
     def __init__(self, name, total_time=1000, recording_time=[0, 1000]):
-        super(MujocoSimulation, self).__init__(name, total_time=total_time, recording_time=recording_time)
+        super(MujocoSimulation, self).__init__(
+            name, total_time=total_time, recording_time=recording_time
+        )
         self.model = load_model_from_path("mujoco_xmls/" + name + ".xml")
         self.sim = MjSim(self.model)
         self.initial_state = self.sim.get_state()
@@ -223,7 +225,9 @@ class MujocoSimulation(Simulation):
 
 class FetchSimulation(Simulation):
     def __init__(self, total_time=152, recording_time=[0, 152]):
-        super(FetchSimulation, self).__init__(name="Fetch", total_time=total_time, recording_time=recording_time)
+        super(FetchSimulation, self).__init__(
+            name="Fetch", total_time=total_time, recording_time=recording_time
+        )
         self.sim = gym.make("FetchReachAL-v0")
         self.seed_value = 0
         self.reset_seed()
