@@ -98,12 +98,12 @@ def main(datadir: Path) -> None:
     if (datadir / "true_reward.npy").exists():
         true_reward = np.load(datadir / "true_reward.npy")
         assert_reward(true_reward, use_equiv, n_reward_features)
-        logging.info(true_reward)
+        logging.info(f"true_reward={true_reward}")
         assert_true_reward_consistency(oriented_normals, true_reward)
 
     if (datadir / "mean_reward.npy").exists():
         mean_reward = np.load(datadir / "mean_reward.npy")
-        logging.info(mean_reward)
+        logging.info(f"mean_reward={mean_reward}")
         assert_reward(mean_reward, use_equiv, n_reward_features)
 
         mean_accuracy = np.mean(oriented_normals @ mean_reward > 0)

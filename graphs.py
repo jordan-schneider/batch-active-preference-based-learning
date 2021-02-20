@@ -1,3 +1,4 @@
+import logging
 import pickle
 import sys
 from pathlib import Path
@@ -240,6 +241,8 @@ def read_confusion(dir: Path, ablation: str = "", max_n: int = -1):
 
     out = compute_targets(out)
 
+    logging.debug(f"Reading inputs with shape={out.shape}, columns={out.columns}")
+
     return out
 
 
@@ -263,11 +266,13 @@ def read_replications(
 ):
     df = pd.DataFrame(columns=["epsilon", "delta", "n", "tn", "fp", "fn", "tp"])
     if replications is not None:
-        for replication in range(1, replications + 1):
+        for replication in range(1, int(replications) + 1):
             if (rootdir / str(replication)).exists():
                 df = df.append(
                     read_confusion(rootdir / str(replication), ablation=ablation, max_n=max_n)
                 )
+            else:
+                logging.warning(f"rootdir={rootdir / str(replication)} does not exist")
     else:
         df = read_confusion(rootdir, ablation=ablation)
 
@@ -654,10 +659,10 @@ def gt(
     font_size: int = 33,
     use_dark_background: bool = False,
     skip_easy: bool = True,
+    verbosity: str = Literal["INFO", "DEBUG"],
 ) -> None:
+    logging.basicConfig(level=verbosity)
     setup_plt(font_size, use_dark_background)
-    max_n = int(max_n)
-
     max_n = int(max_n)
 
     outdir = Path(outdir)
