@@ -19,8 +19,8 @@ dependencies:
     - argh
     - fire
     - joblib
+    - torch
     # Dev dependencies
     - mypy
     - pylint
     - black
-    - torch
