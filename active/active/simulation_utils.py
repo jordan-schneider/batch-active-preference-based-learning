@@ -3,8 +3,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
-from driver.models import LDS, Driver, Fetch, Tosser
-from driver.simulator import Simulation
+from driver.models import LDS, Driver, Fetch, Tosser  # type: ignore
+from driver.simulator import Simulation  # type: ignore
 
 from active import algos
 

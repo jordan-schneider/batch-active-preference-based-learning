@@ -20,6 +20,7 @@ dependencies:
     - fire
     - joblib
     - torch
+    - tensorboard
     # Dev dependencies
     - mypy
     - pylint

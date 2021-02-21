@@ -1,5 +1,8 @@
 from distutils.core import setup
 
+# TODO(joschnei): Add typing info
+
+
 setup(
     name="driver",
     version="0.1",
