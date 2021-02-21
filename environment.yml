@@ -2,15 +2,15 @@ name: vav
 channels:
   - defaults
 dependencies:
-  - theano
-  - pymc
   - python=3.8
   - pip
   - pip:
+    - theano
     - mujoco_py
     - gym
     - pyopengl
     - numpy
+    - pymc
     - pandas
     - matplotlib
     - seaborn
@@ -19,6 +19,7 @@ dependencies:
     - argh
     - fire
     - joblib
+    # Dev dependencies
     - mypy
     - pylint
     - black
