@@ -6,7 +6,7 @@ import scipy.optimize as opt  # type: ignore
 from driver.models import LDS, Driver, Fetch, Tosser
 from driver.simulator import Simulation
 
-import active.algos
+from active import algos
 
 
 def get_simulated_feedback(

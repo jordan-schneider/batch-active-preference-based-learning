@@ -5,7 +5,7 @@ import gym
 import numpy as np
 from mujoco_py import MjSim, MjViewer, load_model_from_path
 
-from driver import car, dynamics, lane, visualize
+from driver import car, dynamics, lane
 from driver.world import World
 
 
@@ -160,6 +160,8 @@ class DrivingSimulation(Simulation):
         self.robot.x = self.initial_state[0]
         self.human.x = self.initial_state[1]
         if self.viewer is None:
+            from driver import visualize
+
             self.viewer = visualize.Visualizer(0.1, magnify=1.2)
             self.viewer.main_car = self.robot
             self.viewer.use_world(self.world)

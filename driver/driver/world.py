@@ -5,7 +5,7 @@ import numpy as np
 import theano as th
 import theano.tensor as tt
 
-from driver import car, dynamics, feature, lane, visualize
+from driver import car, dynamics, feature, lane
 
 th.config.optimizer_verbose = False
 th.config.allow_gc = False
@@ -366,8 +366,9 @@ def world_features(num=0):
 
 
 if __name__ == "__main__":
+    from driver import visualize
+
     world = playground()
-    # world.cars = world.cars[:0]
     vis = visualize.Visualizer(0.1, magnify=1.2)
     vis.main_car = None
     vis.use_world(world)

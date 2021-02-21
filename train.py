@@ -5,8 +5,14 @@ import gym  # type: ignore
 import numpy as np
 
 import driver
+from driver.gym_driver import GymDriver
 from TD3.TD3 import TD3
 from TD3.utils import ReplayBuffer
+
+
+def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.ndarray:
+    state = np.concatenate((raw_state.flatten(), reward_features))
+    return state
 
 
 def main(
@@ -25,17 +31,15 @@ def main(
 
     state_dim = np.prod(env.observation_space.shape) + reward.shape[0]
     action_dim = np.prod(env.action_space.shape)
-    max_action = env.action_space.high
+    # TODO(joschnei): Clamp expects a float, but we should use the entire vector here.
+    max_action = max(np.max(env.action_space.high), -np.min(env.action_space.low))
 
-    td3 = TD3(
-        state_dim=state_dim,
-        action_dim=action_dim,
-        max_action=max_action,
-    )
+    td3 = TD3(state_dim=state_dim, action_dim=action_dim, max_action=max_action,)
 
     buffer = ReplayBuffer(state_dim, action_dim)
 
-    state = env.reset()
+    raw_state = env.reset()
+    state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
 
     for t in range(n_timesteps):
 
@@ -49,7 +53,8 @@ def main(
             ).clip(-max_action, max_action)
 
         # Perform action
-        next_state, reward, done, _ = env.step(action)
+        next_raw_state, reward, done, info = env.step(action)
+        next_state = make_TD3_state(next_raw_state, info["reward_features"])
         done_bool = float(done)
 
         # Store data in replay buffer

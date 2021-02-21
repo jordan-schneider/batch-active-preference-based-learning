@@ -78,12 +78,13 @@ class GymDriver(gym.Env):
         self.human.move()
 
         state = self.state()
-        reward = self.reward @ self.get_features(state)
+        reward_features = self.get_features(state)
+        reward = self.reward @ reward_features
         done = self.timestep >= self.horizon
 
         self.timestep += 1
 
-        return state, reward, done, {}
+        return state, reward, done, {"reward_features": reward_features}
 
     def reset(self) -> Any:
         self.robot.x = self.initial_state[0]
