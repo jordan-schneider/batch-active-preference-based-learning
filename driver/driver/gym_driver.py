@@ -10,20 +10,27 @@ from driver.world import World
 
 
 class GymDriver(gym.Env):
-    def __init__(self, reward: np.ndarray, horizon: int) -> None:
+    def __init__(self, reward: np.ndarray, horizon: int, random_start: bool = False) -> None:
         self.reward = reward
 
         self.world = World()
-        center_lane = lane.StraightLane([0.0, -1.0], [0.0, 1.0], 0.17)
+        self.lane_width = 0.17
+        center_lane = lane.StraightLane([0.0, -1.0], [0.0, 1.0], self.lane_width)
         self.world.lanes += [center_lane, center_lane.shifted(1), center_lane.shifted(-1)]
         self.world.roads += [center_lane]
         self.world.fences += [center_lane.shifted(2), center_lane.shifted(-2)]
         self.dyn = dynamics.CarDynamics(0.1)
+        # each car's state = [x, y, angle, acceleration]
         self.robot = car.Car(self.dyn, [0.0, -0.3, np.pi / 2.0, 0.4], color="orange")
-        self.human = car.Car(self.dyn, [0.17, 0.0, np.pi / 2.0, 0.41], color="white")
+        self.human = car.Car(self.dyn, [self.lane_width, 0.0, np.pi / 2.0, 0.41], color="white")
         self.world.cars.append(self.robot)
         self.world.cars.append(self.human)
         self.initial_state = [self.robot.x, self.human.x]
+        self.random_start = random_start
+        self.random_start_space = Box(
+            low=np.array([-3 * self.lane_width, -0.6, 0, -1]),
+            high=np.array([3 * self.lane_width, 0.3, 2 * np.pi, 2]),
+        )
 
         self.observation_space = Box(low=-1 * np.ones(shape=(2, 4)), high=np.ones(shape=(2, 4)))
         self.action_space = Box(low=-1 * np.ones(shape=(2,)), high=np.ones((2,)))
@@ -87,7 +94,10 @@ class GymDriver(gym.Env):
         return state, reward, done, {"reward_features": reward_features}
 
     def reset(self) -> Any:
-        self.robot.x = self.initial_state[0]
+        if self.random_start:
+            self.robot.x = self.random_start_space.sample()
+        else:
+            self.robot.x = self.initial_state[0]
         self.human.x = self.initial_state[1]
         return self.state()
 

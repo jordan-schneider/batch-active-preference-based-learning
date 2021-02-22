@@ -1,6 +1,7 @@
 import logging
 import pickle as pkl
 from pathlib import Path
+from typing import Union
 
 import fire  # type: ignore
 import numpy as np
@@ -9,7 +10,7 @@ from numpy.linalg import norm
 from active.sampling import Sampler
 
 
-def make_reward_path(reward_path: Path):
+def make_reward_path(reward_path: Union[str, Path]):
     reward_path = Path(reward_path)
 
     if ".npy" in reward_path.name:
