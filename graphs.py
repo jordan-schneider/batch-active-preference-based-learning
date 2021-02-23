@@ -2,7 +2,7 @@ import logging
 import pickle
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
 
 import fire  # type: ignore
 import numpy as np
@@ -42,40 +42,28 @@ def make_xaxis(
     return xticks, xlabels
 
 
-def make_palette_maps(experiments: Sequence[Experiment]):
+def make_palette_map(key_values: np.ndarray) -> dict:
     """Given a sequence of experimental parameters, generate palette maps for representing
     parameter values."""
-    ns = set()
-    deltas = set()
-    for _, delta, n in experiments:
-        ns.add(n)
-        deltas.add(delta)
+    logging.debug(f"key_values shape={key_values.shape}")
+    logging.debug(f"key_values={key_values}")
+    palette = sns.color_palette("muted", len(key_values))
+    palette_map = {val: palette[j] for j, val in enumerate(sorted(key_values))}
 
-    ns_palette = sns.color_palette("muted", len(ns))
-    deltas_palette = sns.color_palette("muted", len(deltas))
-
-    ns_palette_map = {str(n): ns_palette[i] for i, n in enumerate(sorted(ns))}
-    deltas_palette_map = {delta: deltas_palette[i] for i, delta in enumerate(sorted(deltas))}
-    return ns_palette_map, deltas_palette_map
+    return palette_map
 
 
-def get_hue(hue: str, df):
-    ns_palette_map, deltas_palette_map = make_palette_maps(
-        df.loc[:, ["epsilon", "delta", "n"]].drop_duplicates().to_numpy()
-    )
+def get_hue(hue: str, df: pd.DataFrame):
+    palette = make_palette_map(df[hue].drop_duplicates().to_numpy())
     if hue == "n":
-        palette = ns_palette_map
+        assert "n" in df.columns
         hue_order = np.sort(df.n.astype(int).unique()).astype(str)
     elif hue == "delta":
-        palette = deltas_palette_map
-        hue_order = df["delta"].astype(float).unique().sort().astype(str)
+        hue_order = np.sort(df.delta.astype(float).unique()).astype(str)
     else:
         raise ValueError("Hue must be n or delta")
 
     return palette, hue_order
-
-
-# HUMAN EXPERIMENTS
 
 
 def check(
@@ -135,38 +123,6 @@ def make_agreements(file) -> pd.DataFrame:
     return agreements
 
 
-def plot_agreements(
-    agreements: pd.DataFrame, epsilon: float, delta: float, n: int, out: Optional[Path] = None,
-) -> None:
-    """Plots histograms of how many agents had different amounts of holdout agreement for agents
-    prediced tobe aligned and misaligned."""
-    tmp = agreements[
-        np.logical_and(
-            np.logical_and(agreements.epsilon == epsilon, agreements.delta == delta),
-            agreements.n == n,
-        )
-    ]
-
-    tmp[tmp.aligned].value.hist(label="aligned", alpha=0.3)
-    tmp[tmp.aligned == False].value.hist(label="misaligned", alpha=0.3)
-
-    plt.xlabel("Hold out agreement")
-    plt.legend()
-    closefig(out)
-
-
-def plot_mean_agreement(agreements: pd.DataFrame, out: Optional[Path] = None) -> None:
-    mean_agreement = agreements.groupby(["epsilon", "delta", "n", "aligned"]).mean().reset_index()
-    plt.hist(mean_agreement[mean_agreement.aligned].value, label="aligned", alpha=0.3)
-    plt.hist(
-        mean_agreement[np.logical_not(mean_agreement.aligned)].value, label="unaligned", alpha=0.3,
-    )
-
-    plt.xlabel("\% holdout agreement")
-    plt.legend()
-    closefig(out)
-
-
 def make_human_confusion(
     label_path: Path = Path("questions/gt_rewards/alignment.npy"),
     prediction_path: Path = Path("questions/test_results.skip_noise.pkl"),
@@ -196,12 +152,9 @@ def make_human_confusion(
     return df
 
 
-# SIMULATIONS
-
-
-def read_confusion(dir: Path, ablation: str = "", max_n: int = -1):
+def read_confusion(dir: Path, ablation: str = "", max_n: int = -1) -> pd.DataFrame:
     """ Read dict of confusion matrices. """
-    out_dict = pickle.load(open(dir / f"confusion{ablation}.pkl", "rb"))
+    out_dict = pickle.load(open(dir / f"confusion.{ablation}.pkl", "rb"))
 
     out = pd.Series(out_dict).reset_index()
     out.columns = ["epsilon", "delta", "n", "confusion"]
@@ -247,7 +200,7 @@ def compute_targets(df: pd.DataFrame) -> pd.DataFrame:
 
 def read_replications(
     rootdir: Path, ablation: str, replications: Optional[int] = None, max_n: int = -1
-):
+) -> pd.DataFrame:
     df = pd.DataFrame(columns=["epsilon", "delta", "n", "tn", "fp", "fn", "tp"])
     if replications is not None:
         for replication in range(1, int(replications) + 1):
@@ -268,6 +221,77 @@ def read_replications(
     return df
 
 
+def get_max_delta(df: pd.DataFrame, target: str) -> pd.DataFrame:
+    df = df.copy()
+
+    df["means"] = (
+        df[["n", "epsilon", "delta", target]].groupby(["n", "epsilon", "delta"]).transform("mean")
+    ).astype(float)
+    df["max_mean_delta"] = df.groupby(["n", "epsilon"]).means.transform("max")
+
+    df = df[df.means == df.max_mean_delta]
+    df = df.drop(columns=["means", "max_mean_delta"])
+
+    return df
+
+
+def get_rows_per_replication(df: pd.DataFrame) -> int:
+    return df.epsilon.unique().size * df.n.unique().size * df.delta.unique().size
+
+
+def fill_na(df) -> None:
+    df.fpr.fillna(1.0, inplace=True)
+    df.fnr.fillna(0.0, inplace=True)
+
+
+def setup_plt(font_size: int, use_dark_background: bool) -> None:
+    plt.rc("text", usetex=True)
+    plt.rcParams.update({"font.size": font_size})
+    if use_dark_background:
+        plt.style.use("dark_background")
+
+
+def assert_style(style: str) -> Style:
+    style = style.upper()
+    assert style in ("ICML", "NEURIPS", "POSTER")
+    return cast(Style, style)
+
+
+### Plots
+
+
+def plot_agreements(
+    agreements: pd.DataFrame, epsilon: float, delta: float, n: int, out: Optional[Path] = None,
+) -> None:
+    """Plots histograms of how many agents had different amounts of holdout agreement for agents
+    prediced tobe aligned and misaligned."""
+    tmp = agreements[
+        np.logical_and(
+            np.logical_and(agreements.epsilon == epsilon, agreements.delta == delta),
+            agreements.n == n,
+        )
+    ]
+
+    tmp[tmp.aligned].value.hist(label="aligned", alpha=0.3)
+    tmp[tmp.aligned == False].value.hist(label="misaligned", alpha=0.3)
+
+    plt.xlabel("Hold out agreement")
+    plt.legend()
+    closefig(out)
+
+
+def plot_mean_agreement(agreements: pd.DataFrame, out: Optional[Path] = None) -> None:
+    mean_agreement = agreements.groupby(["epsilon", "delta", "n", "aligned"]).mean().reset_index()
+    plt.hist(mean_agreement[mean_agreement.aligned].value, label="aligned", alpha=0.3)
+    plt.hist(
+        mean_agreement[np.logical_not(mean_agreement.aligned)].value, label="unaligned", alpha=0.3,
+    )
+
+    plt.xlabel("\% holdout agreement")
+    plt.legend()
+    closefig(out)
+
+
 def plot_fpr(
     df: pd.DataFrame,
     rootdir: Path,
@@ -277,7 +301,7 @@ def plot_fpr(
     best_delta: bool = True,
     n_labels: int = 5,
     ticks_per_label: int = 5,
-):
+) -> None:
     plt.figure(figsize=(10, 10))
 
     df = df.dropna(subset=["fpr"])
@@ -349,7 +373,7 @@ def plot_fnr(
     style: Style,
     hue: str = "n",
     best_delta: bool = True,
-):
+) -> None:
     plt.figure(figsize=(10, 10))
 
     df = df[np.isfinite(df.fnr)]
@@ -391,20 +415,6 @@ def plot_fnr(
     closefig()
 
 
-def get_max_delta(df: pd.DataFrame, target: str):
-    df = df.copy()
-
-    df["means"] = (
-        df[["n", "epsilon", "delta", target]].groupby(["n", "epsilon", "delta"]).transform("mean")
-    ).astype(float)
-    df["max_mean_delta"] = df.groupby(["n", "epsilon"]).means.transform("max")
-
-    df = df[df.means == df.max_mean_delta]
-    df = df.drop(columns=["means", "max_mean_delta"])
-
-    return df
-
-
 def plot_accuracy(
     df: pd.DataFrame,
     rootdir: Path,
@@ -414,7 +424,7 @@ def plot_accuracy(
     best_delta: bool = True,
     n_labels: int = 5,
     ticks_per_label: int = 5,
-):
+) -> None:
     plt.figure(figsize=(10, 10))
 
     df = df.dropna(subset=["acc"])
@@ -475,13 +485,85 @@ def plot_accuracy(
     closefig()
 
 
-def get_rows_per_replication(df: pd.DataFrame) -> int:
-    return df.epsilon.unique().size * df.n.unique().size * df.delta.unique().size
+def plot_delta_accuracy(
+    confusion_a: pd.DataFrame,
+    confusion_b: pd.DataFrame,
+    outdir: Path,
+    ablation: str,
+    style: Style,
+    hue: str = "n",
+    best_delta: bool = False,
+    n_labels=6,
+    ticks_per_label=5,
+) -> None:
+    # confusion = pd.merge(confusion_a, confusion_b, how="inner", on="")
+    # Clean individual dataframes
+    accs = list()
+    for confusion in (confusion_a, confusion_b):
+        confusion = confusion.dropna(subset=["acc"])
+        if best_delta:
+            confusion = get_max_delta(confusion, "acc")
+
+        accs.append(pd.DataFrame(confusion.groupby(["epsilon", "n"]).mean())[["acc"]])
+
+    delta_acc = pd.DataFrame(accs[0] - accs[1]).reset_index()
+
+    palette, hue_order = get_hue(hue, delta_acc)
+    xticks, xlabels = make_xaxis(
+        lower=delta_acc.epsilon.min(),
+        upper=delta_acc.epsilon.max(),
+        n_labels=n_labels,
+        ticks_per_label=ticks_per_label,
+    )
+
+    sns.relplot(
+        kind="line",
+        x="epsilon",
+        y="acc",
+        hue=hue,
+        data=delta_acc,
+        palette=palette,
+        hue_order=hue_order,
+        legend="brief",
+        aspect=2,
+    )
+
+    if style == "POSTER":
+        plt.xlabel("Value Slack")
+        plt.ylabel(r"$\Delta$Accuracy")
+        plt.xticks(
+            ticks=xticks, labels=xlabels,
+        )
+        plt.ylim((0, 1.01))
+        transparent = True
+    elif style == "NEURIPS":
+        plt.xlabel(r"$\epsilon$")
+        plt.ylabel(r"$\Delta$Accuracy")
+        plt.title(r"Accuracy improvement of active queries over random baseline")
+        plt.xticks(
+            ticks=xticks, labels=xlabels,
+        )
+        plt.ylim((0, 1.01))
+        transparent = False
+    elif style == "ICML":
+        plt.xlabel(r"$\epsilon$")
+        plt.ylabel(r"$\Delta$Accuracy")
+        plt.xticks(
+            ticks=xticks, labels=xlabels,
+        )
+        plt.ylim((0, 1.01))
+        transparent = False
+    else:
+        raise ValueError(f"Style {style} not defined.")
+
+    plt.savefig(outdir / ("delta_acc." + ablation + ".pdf"), transparent=transparent)
+    plt.savefig(outdir / ("delta_acc." + ablation + ".png"), transparent=transparent)
+    closefig()
 
 
 def plot_individual_fpr(
     df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n", n_replications: int = 10,
-):
+) -> None:
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
     rows_per_replication = get_rows_per_replication(df)
@@ -511,7 +593,7 @@ def plot_individual_fpr(
         closefig()
 
 
-def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n):
+def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n) -> None:
     xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
     df = df[df.n == n]
     plt.figure(figsize=(10, 10))
@@ -529,7 +611,7 @@ def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n):
     closefig()
 
 
-def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
+def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n") -> None:
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
     g = sns.relplot(
@@ -558,7 +640,7 @@ def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n"):
 
 def plot_individual_tp(
     df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n", n_replications: int = 10,
-):
+) -> None:
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
     rows_per_replication = get_rows_per_replication(df)
@@ -588,29 +670,53 @@ def plot_individual_tp(
         closefig()
 
 
-def fill_na(df):
-    df.fpr.fillna(1.0, inplace=True)
-    df.fnr.fillna(0.0, inplace=True)
+def comparison(
+    outdir: Path,
+    style: Union[str, Style],
+    rootdir: Path = Path("data/simulated"),
+    methods: List[str] = ["active", "random"],
+    test_name: str = "comparison_point_reward_test",
+    ablation: str = "skip_noise",
+    replications: Optional[int] = None,
+    max_n: int = -1,
+    use_best_delta: bool = False,
+    font_size: int = 33,
+    dark: bool = False,
+    skip_easy: bool = True,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
+) -> None:
+    logging.basicConfig(level=verbosity)
+    setup_plt(font_size, dark)
+    max_n = int(max_n)
+    rootdir = Path(rootdir)
+    outdir = Path(outdir)
 
+    assert len(methods) == 2, "Exactly two methods required"
+    confusions = list()
+    for method in methods:
+        datadir = Path(rootdir) / method / test_name
+        confusion = read_replications(datadir, ablation, replications, max_n)
+        if skip_easy:
+            confusion = confusion[confusion.tp + confusion.fn != 100]
+            confusion = confusion[confusion.tn + confusion.fp != 100]
+        confusions.append(confusion)
 
-def setup_plt(font_size: int, use_dark_background: bool) -> None:
-    plt.rc("text", usetex=True)
-    plt.rcParams.update({"font.size": font_size})
-    if use_dark_background:
-        plt.style.use("dark_background")
-
-
-def assert_style(style: str) -> Style:
-    style = style.upper()
-    assert style in ("ICML", "NEURIPS", "POSTER")
-    return cast(Style, style)
+    plot_delta_accuracy(
+        confusions[0],
+        confusions[1],
+        ablation=ablation,
+        style=cast(Style, style),
+        hue="n",
+        best_delta=use_best_delta,
+        outdir=outdir,
+    )
 
 
 def gt(
     outdir: Path,
     style: Union[str, Style],
     confusion_path: Path,
-    ablation: str = ".skip_noise",
+    ablation: str = "skip_noise",
     replications: Optional[int] = None,
     max_n: int = -1,
     font_size: int = 33,
@@ -648,7 +754,7 @@ def human(
     prediction_path: Path,
     outdir: Path,
     style: Style,
-    ablation: str = ".skip_noise",
+    ablation: str = "skip_noise",
     font_size: int = 33,
     use_dark_background: bool = False,
 ) -> None:
