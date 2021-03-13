@@ -1,20 +1,21 @@
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import driver  # type: ignore
 import fire  # type: ignore
 import gym  # type: ignore
 import numpy as np
 from driver.gym_driver import GymDriver  # type: ignore
+from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
 from torch.utils.tensorboard import SummaryWriter
 
 from active.simulation_utils import create_env  # type: ignore
 from collect_gt_alignment import make_path
-from TD3.TD3 import TD3  # type: ignore
+from TD3.TD3 import TD3, load_td3  # type: ignore
 from TD3.utils import ReplayBuffer  # type: ignore
 from utils import make_reward_path
 
@@ -39,6 +40,7 @@ def train(
     outdir: Path,
     actor_layers: List[int] = [256, 256],
     critic_layers: List[int] = [256, 256],
+    dense: bool = False,
     n_timesteps: int = int(1e6),
     n_random_timesteps: int = int(25e3),
     exploration_noise: float = 0.1,
@@ -49,6 +51,7 @@ def train(
     timestamp: bool = False,
     random_start: bool = False,
     n_replications: Optional[int] = None,
+    plot_episodes: bool = False,
     verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ) -> None:
     logging.basicConfig(level=verbosity)
@@ -63,6 +66,7 @@ def train(
                 outdir=Path(outdir) / str(i),
                 actor_layers=actor_layers,
                 critic_layers=critic_layers,
+                dense=dense,
                 n_timesteps=n_timesteps,
                 n_random_timesteps=n_random_timesteps,
                 exploration_noise=exploration_noise,
@@ -86,53 +90,32 @@ def train(
     env = gym.make("driver-v1", reward=reward, horizon=horizon, random_start=random_start)
     logging.info("Initialized env")
 
-    state_dim = np.prod(env.observation_space.shape) + reward.shape[0]
-    action_dim = np.prod(env.action_space.shape)
-    # TODO(joschnei): Clamp expects a float, but we should use the entire vector here.
-    max_action = max(np.max(env.action_space.high), -np.min(env.action_space.low))
-
-    td3 = TD3(
-        state_dim=state_dim,
-        action_dim=action_dim,
-        max_action=max_action,
-        actor_kwargs={"layers": actor_layers},
-        critic_kwargs={"layers": critic_layers},
-        writer=writer,
-    )
+    td3_dir = outdir / model_name
+    if td3_dir.exists():
+        td3 = load_td3(env, td3_dir, writer)
+    else:
+        td3 = make_td3(
+            env,
+            actor_kwargs={"layers": actor_layers, "dense": dense},
+            critic_kwargs={"layers": critic_layers, "dense": dense},
+            writer=writer,
+        )
+    buffer = ReplayBuffer(td3.state_dim, td3.action_dim, writer=writer)
     logging.info("Initialized TD3 algorithm")
-
-    if (outdir / model_name).exists():
-        td3.load(outdir / model_name)
-        logging.info("Loaded existing TD3 model weights")
-
-    buffer = ReplayBuffer(state_dim, action_dim, writer=writer)
 
     raw_state = env.reset()
     state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
 
     episode_reward_feautures = np.empty((env.horizon, *env.reward.shape))
     episode_actions = np.empty((env.horizon, *env.action_space.shape))
+    best_return = float("-inf")
     for t in range(n_timesteps):
-        if t < n_random_timesteps:
-            action = env.action_space.sample()
-        else:
-            action = (
-                td3.select_action(np.array(state))
-                + np.random.normal(0, max_action * exploration_noise, size=action_dim)
-            ).clip(-max_action, max_action)
-
-        # Perform action
+        action = pick_action(t, n_random_timesteps, env, td3, state, exploration_noise)
         next_raw_state, reward, done, info = env.step(action)
+        log_step(next_raw_state, action, reward, info, log_iter=t, writer=writer)
 
+        # Log episode features
         reward_features = info["reward_features"]
-        writer.add_scalar("reward", reward, t)
-        writer.add_scalar("R/lane", reward_features[0], t)
-        writer.add_scalar("R/speed", reward_features[1], t)
-        writer.add_scalar("R/heading", reward_features[2], t)
-        writer.add_scalar("R/dist", reward_features[3], t)
-        writer.add_scalar("A/accel", action[1], t)
-        writer.add_scalar("A/turn", action[0], t)
-
         if save_period - (t % save_period) <= env.horizon:
             episode_reward_feautures[t % env.horizon] = reward_features
             episode_actions[t % env.horizon] = action
@@ -140,7 +123,9 @@ def train(
         if done:
             assert t % horizon == horizon - 1, f"Done at t={t} when horizon={horizon}"
             raw_state = env.reset()
-            state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
+            next_state = make_TD3_state(
+                raw_state, reward_features=GymDriver.get_features(raw_state)
+            )
         else:
             next_state = make_TD3_state(next_raw_state, reward_features)
 
@@ -156,7 +141,7 @@ def train(
         if t % save_period == 0:
             logging.info(f"{t} / {n_timesteps}")
 
-            if t != 0:
+            if plot_episodes and t != 0:
                 plot_heading(
                     heading=episode_reward_feautures[:, 2],
                     outdir=outdir,
@@ -164,6 +149,30 @@ def train(
                 )
                 plot_turn(turn=episode_actions[:, 0], outdir=outdir, name=str(t // save_period))
             td3.save(str(outdir / model_name))
+
+            eval_return = eval(
+                reward_path, td3_dir=outdir / model_name, writer=writer, horizon=horizon
+            )
+            if eval_return > best_return:
+                best_return = eval_return
+                td3.save(str(outdir / (f"best_{model_name}")))
+
+
+def pick_action(
+    t: int,
+    n_random_timesteps: int,
+    env: GymDriver,
+    td3: TD3,
+    state: np.ndarray,
+    exploration_noise: float,
+) -> np.ndarray:
+    if t < n_random_timesteps:
+        return env.action_space.sample()
+
+    return (
+        td3.select_action(np.array(state))
+        + np.random.normal(0, td3.max_action * exploration_noise, size=td3.action_dim)
+    ).clip(-td3.max_action, td3.max_action)
 
 
 def plot_heading(heading: np.ndarray, outdir: Path, name: str = "") -> None:
@@ -186,39 +195,77 @@ def plot_turn(turn: np.ndarray, outdir: Path, name: str = "") -> None:
     plt.close()
 
 
-def eval(reward_path: Path, td3_dir: Path, horizon: int = 50):
-    logging.basicConfig(level="INFO")
-    logging.info("Evaluating the policy")
-    reward_weights = np.load(reward_path)
-    env = gym.make("driver-v1", reward=reward_weights, horizon=horizon)
+def log_step(
+    state: np.ndarray,
+    action: np.ndarray,
+    reward: float,
+    info: dict,
+    log_iter: int,
+    writer: SummaryWriter,
+) -> None:
+    reward_features = info["reward_features"]
+    writer.add_scalar("reward", reward, log_iter)
+    writer.add_scalar("R/lane", reward_features[0], log_iter)
+    writer.add_scalar("R/speed", reward_features[1], log_iter)
+    writer.add_scalar("R/heading", reward_features[2], log_iter)
+    writer.add_scalar("R/dist", reward_features[3], log_iter)
+    writer.add_scalar("A/accel", action[1], log_iter)
+    writer.add_scalar("A/turn", action[0], log_iter)
 
-    state_dim = np.prod(env.observation_space.shape) + reward_weights.shape[0]
+
+def make_td3(
+    env: GymDriver,
+    actor_kwargs: Dict[str, Any] = {},
+    critic_kwargs: Dict[str, Any] = {},
+    writer: Optional[SummaryWriter] = None,
+) -> TD3:
+    state_dim = np.prod(env.observation_space.shape) + env.reward.shape[0]
     action_dim = np.prod(env.action_space.shape)
     # TODO(joschnei): Clamp expects a float, but we should use the entire vector here.
     max_action = max(np.max(env.action_space.high), -np.min(env.action_space.low))
 
-    td3 = TD3(state_dim=state_dim, action_dim=action_dim, max_action=max_action)
-    td3.load(td3_dir)
+    td3 = TD3(
+        state_dim=state_dim,
+        action_dim=action_dim,
+        max_action=max_action,
+        actor_kwargs=actor_kwargs,
+        critic_kwargs=critic_kwargs,
+        writer=writer,
+    )
 
-    logging.info("Loaded the actor-critic models.")
+    return td3
+
+
+def eval(
+    reward_weights: Path, td3_dir: Path, writer: Optional[SummaryWriter] = None, horizon: int = 50,
+):
+    logging.basicConfig(level="INFO")
+    logging.info("Evaluating the policy")
+    env = gym.make("driver-v1", reward=reward_weights, horizon=horizon)
+
+    td3 = load_td3(env, filename=td3_dir, writer=writer)
 
     raw_state = env.reset()
     state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
     rewards = np.empty((horizon,))
     for t in range(horizon):
-        raw_state, reward, _, info = env.step(td3.select_action(state))
+        raw_state, reward, done, info = env.step(td3.select_action(state))
         state = make_TD3_state(raw_state=raw_state, reward_features=info["reward_features"])
         rewards[t] = reward
+    assert done
     empirical_return = np.mean(rewards)
+    return empirical_return
 
-    logging.info("Rollout done. Finding optimal path.")
+
+def compare(reward_path: Path, td3_dir: Path, horizon: int = 50):
+    reward_weights = np.load(reward_path)
+    empirical_return = eval(reward_weights, td3_dir, horizon=horizon)
 
     opt_traj = make_path(reward_weights)
     simulation_object = create_env("driver")
     simulation_object.set_ctrl(opt_traj)
     features = simulation_object.get_features()
     opt_return = reward_weights @ features
-
     logging.info(f"Optimal return={opt_return}, empirical return={empirical_return}")
 
 

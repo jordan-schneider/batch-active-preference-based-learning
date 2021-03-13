@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
-from driver.models import LDS, Driver, Fetch, Tosser  # type: ignore
+from driver.models import Driver  # type: ignore
 from driver.simulator import Simulation  # type: ignore
 
 from active import algos
@@ -62,14 +62,8 @@ def get_feedback(simulation_object, input_A, input_B, query_type):
 
 
 def create_env(task):
-    if task == "lds":
-        return LDS()
-    elif task == "driver":
+    if task == "driver":
         return Driver()
-    elif task == "tosser":
-        return Tosser()
-    elif task == "fetch":
-        return Fetch()
     else:
         raise ValueError("There is no task called " + task)
 
