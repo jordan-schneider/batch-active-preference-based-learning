@@ -14,14 +14,33 @@ from matplotlib import pyplot as plt  # type: ignore
 from torch.utils.tensorboard import SummaryWriter
 
 from active.simulation_utils import create_env  # type: ignore
-from collect_gt_alignment import make_path
 from TD3.TD3 import TD3, load_td3  # type: ignore
 from TD3.utils import ReplayBuffer  # type: ignore
-from utils import make_reward_path
+from utils import make_path, make_reward_path
 
 
 def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.ndarray:
-    state = np.concatenate((raw_state.flatten(), reward_features))
+    if len(raw_state.shape) == 3:
+        assert raw_state.shape[1:] == (2, 4)
+        assert len(reward_features.shape) == 2
+        assert reward_features.shape[1:] == (
+            4,
+        ), f"reward features shape={reward_features.shape} when state shape={raw_state.shape}"
+        assert raw_state.shape[0] == reward_features.shape[0]
+
+        n = raw_state.shape[0]
+        raw_state = raw_state.reshape(-1, 8)
+        assert raw_state.shape == (n, 8)
+
+        state = np.concatenate((raw_state, reward_features), axis=1)
+    elif len(raw_state.shape == 2):
+        assert len(reward_features.shape) == 1
+        assert raw_state.shape == (2, 4)
+        raw_state = raw_state.flatten()
+        assert raw_state.shape == (8,)
+
+        state = np.concatenate((raw_state, reward_features))
+
     return state
 
 
@@ -86,13 +105,12 @@ def train(
     writer = SummaryWriter(log_dir=outdir)
     logging.basicConfig(filename=outdir / "log", level=verbosity)
 
-    reward = np.load(reward_path)
-    env = gym.make("driver-v1", reward=reward, horizon=horizon, random_start=random_start)
+    reward_weights = np.load(reward_path)
+    env = gym.make("driver-v1", reward=reward_weights, horizon=horizon, random_start=random_start)
     logging.info("Initialized env")
 
-    td3_dir = outdir / model_name
-    if td3_dir.exists():
-        td3 = load_td3(env, td3_dir, writer)
+    if (outdir / (model_name + "_actor")).exists():
+        td3 = load_td3(env=env, filename=outdir / model_name, writer=writer)
     else:
         td3 = make_td3(
             env,
@@ -106,7 +124,7 @@ def train(
     raw_state = env.reset()
     state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
 
-    episode_reward_feautures = np.empty((env.horizon, *env.reward.shape))
+    episode_reward_feautures = np.empty((env.horizon, *env.reward_weights.shape))
     episode_actions = np.empty((env.horizon, *env.action_space.shape))
     best_return = float("-inf")
     for t in range(n_timesteps):
@@ -122,9 +140,9 @@ def train(
 
         if done:
             assert t % horizon == horizon - 1, f"Done at t={t} when horizon={horizon}"
-            raw_state = env.reset()
+            next_raw_state = env.reset()
             next_state = make_TD3_state(
-                raw_state, reward_features=GymDriver.get_features(raw_state)
+                raw_state, reward_features=GymDriver.get_features(next_raw_state)
             )
         else:
             next_state = make_TD3_state(next_raw_state, reward_features)
@@ -151,7 +169,11 @@ def train(
             td3.save(str(outdir / model_name))
 
             eval_return = eval(
-                reward_path, td3_dir=outdir / model_name, writer=writer, horizon=horizon
+                reward_weights,
+                td3_dir=outdir / model_name,
+                writer=writer,
+                log_iter=t // save_period,
+                horizon=horizon,
             )
             if eval_return > best_return:
                 best_return = eval_return
@@ -219,7 +241,7 @@ def make_td3(
     critic_kwargs: Dict[str, Any] = {},
     writer: Optional[SummaryWriter] = None,
 ) -> TD3:
-    state_dim = np.prod(env.observation_space.shape) + env.reward.shape[0]
+    state_dim = np.prod(env.observation_space.shape) + env.reward_weights.shape[0]
     action_dim = np.prod(env.action_space.shape)
     # TODO(joschnei): Clamp expects a float, but we should use the entire vector here.
     max_action = max(np.max(env.action_space.high), -np.min(env.action_space.low))
@@ -237,7 +259,11 @@ def make_td3(
 
 
 def eval(
-    reward_weights: Path, td3_dir: Path, writer: Optional[SummaryWriter] = None, horizon: int = 50,
+    reward_weights: np.ndarray,
+    td3_dir: Path,
+    writer: Optional[SummaryWriter] = None,
+    log_iter: Optional[int] = None,
+    horizon: int = 50,
 ):
     logging.basicConfig(level="INFO")
     logging.info("Evaluating the policy")
@@ -254,6 +280,9 @@ def eval(
         rewards[t] = reward
     assert done
     empirical_return = np.mean(rewards)
+    if writer is not None:
+        assert log_iter is not None
+        writer.add_scalar("Eval/return", empirical_return, log_iter)
     return empirical_return
 
 
@@ -267,6 +296,52 @@ def compare(reward_path: Path, td3_dir: Path, horizon: int = 50):
     features = simulation_object.get_features()
     opt_return = reward_weights @ features
     logging.info(f"Optimal return={opt_return}, empirical return={empirical_return}")
+
+
+def refine(
+    reward_path: Path,
+    td3_dir: Path,
+    horizon: int = 50,
+    env_iters: int = int(1e5),
+    batch_size: int = 100,
+):
+    td3_dir = Path(td3_dir)
+    writer = SummaryWriter(log_dir=td3_dir.parent, filename_suffix="refine")
+
+    reward_weights = np.load(reward_path)
+    env = gym.make("driver-v1", reward=reward_weights, horizon=horizon)
+    td3 = load_td3(env, td3_dir, writer=writer)
+
+    buffer = ReplayBuffer(td3.state_dim, td3.action_dim, writer=writer)
+    logging.info("Initialized TD3 algorithm")
+
+    raw_state = env.reset()
+    state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
+
+    for t in range(env_iters):
+        action = td3.select_action(state)
+        next_raw_state, reward, done, info = env.step(action)
+        log_step(next_raw_state, action, reward, info, log_iter=t, writer=writer)
+
+        reward_features = info["reward_features"]
+
+        if done:
+            assert t % horizon == horizon - 1, f"Done at t={t} when horizon={horizon}"
+            next_raw_state = env.reset()
+            next_state = make_TD3_state(
+                next_raw_state, reward_features=GymDriver.get_features(next_raw_state)
+            )
+        else:
+            next_state = make_TD3_state(next_raw_state, reward_features)
+
+        # Store data in replay buffer
+        buffer.add(state, action, next_state, reward, done=float(done))
+
+        state = next_state
+
+        td3.update_critic(*buffer.sample(batch_size))
+
+        td3.save(str(td3_dir) + "_refined")
 
 
 if __name__ == "__main__":

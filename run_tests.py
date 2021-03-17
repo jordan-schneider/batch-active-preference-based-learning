@@ -9,14 +9,19 @@ from pathlib import Path
 from typing import Dict, Generator, List, Optional, Sequence, Set, Tuple, Union, cast
 
 import argh  # type: ignore
+import driver  # type: ignore
+import gym  # type: ignore
 import numpy as np
 from argh import arg
+from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
 from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
 from active.simulation_utils import create_env
+from policy import make_TD3_state
 from random_baseline import make_random_questions
+from TD3.TD3 import TD3, load_td3  # type: ignore
 from test_factory import TestFactory
 from utils import (
     assert_nonempty,
@@ -24,6 +29,7 @@ from utils import (
     assert_reward,
     assert_rewards,
     get_mean_reward,
+    make_path,
     normalize,
     orient_normals,
 )
@@ -52,12 +58,8 @@ def make_gaussian_rewards(
     return rewards
 
 
-def find_reward_boundary(
-    normals: np.ndarray,
-    n_rewards: int,
-    reward: np.ndarray,
-    epsilon: float,
-    use_equiv: bool,
+def old_find_reward_boundary(
+    normals: np.ndarray, n_rewards: int, reward: np.ndarray, epsilon: float, use_equiv: bool,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Generates n_rewards reward vectors and determines which are aligned. """
     assert_normals(normals, use_equiv)
@@ -94,6 +96,80 @@ def find_reward_boundary(
     return rewards, ground_truth_alignment
 
 
+def find_reward_boundary(
+    true_reward: np.ndarray,
+    td3_dir: Path,
+    n_rewards: int,
+    use_equiv: bool,
+    epsilon: float,
+    n_samples: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    # TODO(joschnei): Un-hardcode horizon.
+    env = gym.make("driver-v1", reward=true_reward, horizon=50)
+    td3 = load_td3(env, td3_dir)
+
+    cov = 1.0
+    rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
+    alignment = rewards_aligned(td3, env, rewards, epsilon, n_samples).cpu().numpy()
+    mean_agree = np.mean(alignment)
+
+    while mean_agree > 0.55 or mean_agree < 0.45:
+        if mean_agree > 0.55:
+            cov *= 1.1
+        else:
+            cov /= 1.1
+        if not np.isfinite(cov) or cov <= 0.0 or cov >= 100.0:
+            # TODO(joschnei): Break is a code smell
+            logging.warning(f"cov={cov}, using last good batch of rewards.")
+            break
+        rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
+        alignment = rewards_aligned(td3, env, rewards, epsilon, n_samples).cpu().numpy()
+        mean_agree = np.mean(alignment)
+
+    assert alignment.shape == (
+        n_rewards,
+    ), f"Alignment shape={alignment.shape}, expected={(n_rewards,)}"
+    assert rewards.shape == (n_rewards, *true_reward.shape)
+
+    return rewards, alignment
+
+
+def rewards_aligned(
+    td3: TD3, env: Env, test_rewards: np.ndarray, epsilon: float, n_samples: int = int(1e4)
+):
+    raw_states = np.array([env.observation_space.sample() for _ in range(n_samples)])
+    reward_features = env.get_feature_batch(raw_states)
+    states = make_TD3_state(raw_states, reward_features)
+    opt_actions = td3.select_action(states)
+    opt_values = td3.critic.Q1(states, opt_actions).reshape(-1)
+
+    state_shape = env.observation_space.sample().shape
+    reward_feature_shape = reward_features[0].shape
+    action_shape = env.action_space.sample().shape
+
+    assert states.shape == (
+        n_samples,
+        np.prod(state_shape) + np.prod(reward_feature_shape),
+    ), f"States shape={states.shape}"
+    assert opt_actions.shape == (
+        n_samples,
+        *action_shape,
+    ), f"Actions shape={opt_actions.shape}, expected={(n_samples, *action_shape)}"
+    assert opt_values.shape == (n_samples,), f"Value shape={opt_values.shape}"
+
+    trajs = np.array(
+        [make_path(reward, state) for reward, state in zip(test_rewards, raw_states)]
+    ).reshape(n_samples, -1, *action_shape)
+    actions = trajs[:, 0]
+    assert actions.shape == (n_samples, *action_shape), f"Actions shape={actions.shape}"
+    values = td3.critic.Q1(states, actions).reshape(-1)
+
+    assert values.shape == (n_samples,), f"Value shape={values.shape}"
+
+    alignment = opt_values - values < epsilon
+    return alignment
+
+
 def run_test(normals: np.ndarray, test_rewards: np.ndarray, use_equiv: bool) -> np.ndarray:
     """ Returns the predicted alignment of the fake rewards by the normals. """
     assert_normals(normals, use_equiv)
@@ -116,9 +192,7 @@ def eval_test(
         return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
     else:
         return confusion_matrix(
-            y_true=aligned,
-            y_pred=np.ones(aligned.shape, dtype=bool),
-            labels=[False, True],
+            y_true=aligned, y_pred=np.ones(aligned.shape, dtype=bool), labels=[False, True],
         )
 
 
@@ -255,6 +329,7 @@ def run_human_experiment(
 def run_gt_experiment(
     normals: np.ndarray,
     n_rewards: int,
+    n_traj_samples: int,
     reward: np.ndarray,
     epsilon: float,
     delta: float,
@@ -264,6 +339,7 @@ def run_gt_experiment(
     input_features: np.ndarray,
     preferences: np.ndarray,
     outdir: Path,
+    model_dir: Path,
 ) -> Tuple[np.ndarray, np.ndarray, Experiment]:
     experiment = (epsilon, delta, n_human_samples)
 
@@ -280,7 +356,14 @@ def run_gt_experiment(
     logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n_human_samples}")
 
     # TODO(joschnei): Really need to make this a fixed set common between comparisons.
-    rewards, aligned = find_reward_boundary(normals, n_rewards, reward, epsilon, use_equiv)
+    rewards, aligned = find_reward_boundary(
+        true_reward=reward,
+        td3_dir=model_dir,
+        n_rewards=n_rewards,
+        use_equiv=use_equiv,
+        epsilon=epsilon,
+        n_samples=n_traj_samples,
+    )
     logging.info(f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}")
 
     filtered_normals = normals[:n_human_samples]
@@ -388,7 +471,8 @@ def simulated(
     deltas: List[float] = [0.05],
     n_rewards: int = 100,
     human_samples: List[int] = [1],
-    n_model_samples: int = 1000,
+    n_reward_samples: int = 1000,
+    n_traj_samples: int = 1000,
     input_features_name: Path = Path("input_features.npy"),
     normals_name: Path = Path("normals.npy"),
     preferences_name: Path = Path("preferences.npy"),
@@ -396,6 +480,7 @@ def simulated(
     flags_name: Path = Path("flags.pkl"),
     datadir: Path = Path(),
     outdir: Path = Path(),
+    model_dir: Path = Path(),
     use_equiv: bool = False,
     use_mean_reward: bool = False,
     use_random_test_questions: bool = False,
@@ -423,7 +508,7 @@ def simulated(
                 deltas=deltas,
                 n_rewards=n_rewards,
                 human_samples=human_samples,
-                n_model_samples=n_model_samples,
+                n_reward_samples=n_reward_samples,
                 input_features_name=input_features_name,
                 normals_name=normals_name,
                 preferences_name=preferences_name,
@@ -468,7 +553,7 @@ def simulated(
         query_type=query_type,
         reward_dimension=elicited_normals.shape[1],
         equiv_probability=equiv_probability,
-        n_reward_samples=n_model_samples,
+        n_reward_samples=n_reward_samples,
         use_mean_reward=use_mean_reward,
         skip_noise_filtering=skip_noise_filtering,
         skip_epsilon_filtering=skip_epsilon_filtering,
@@ -526,17 +611,19 @@ def simulated(
 
     for indices, confusion, experiment in Parallel(n_jobs=-2)(
         delayed(run_gt_experiment)(
-            normals,
-            n_rewards,
-            true_reward,
-            epsilon,
-            delta,
-            use_equiv,
-            n,
-            factory,
-            input_features,
-            preferences,
-            outdir,
+            normals=normals,
+            n_rewards=n_rewards,
+            n_traj_samples=n_traj_samples,
+            reward=true_reward,
+            epsilon=epsilon,
+            delta=delta,
+            use_equiv=use_equiv,
+            n_human_samples=n,
+            factory=factory,
+            input_features=input_features,
+            preferences=preferences,
+            outdir=outdir,
+            model_dir=model_dir,
         )
         for epsilon, delta, n in experiments
     ):
@@ -562,11 +649,7 @@ def make_random_test(
             "Must supply n_random_test_questions if use_random_test_questions is true."
         )
     mean_reward = get_mean_reward(
-        elicited_input_features,
-        elicited_preferences,
-        reward_iterations,
-        query_type,
-        equiv_size,
+        elicited_input_features, elicited_preferences, reward_iterations, query_type, equiv_size,
     )
     inputs = make_random_questions(n_random_test_questions, sim)
     input_features, normals = make_normals(inputs, sim, use_equiv)

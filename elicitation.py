@@ -9,64 +9,9 @@ import numpy as np
 from joblib.parallel import Parallel, delayed  # type: ignore
 
 from active.sampling import Sampler
-from active.simulation_utils import create_env, get_feedback, get_simulated_feedback, run_algo
-from utils import make_reward_path
-
-
-def load(outdir: Path, filename: str, overwrite: bool) -> Optional[np.ndarray]:
-    if overwrite:
-        return None
-
-    filepath = outdir / filename
-    if filepath.exists():
-        return np.load(filepath)
-
-    return None
-
-
-def make_mode_reward(
-    query_type: str, w_sampler, n_reward_samples: int, true_delta: Optional[float] = None
-) -> np.ndarray:
-    w_samples, _ = w_sampler.sample_given_delta(n_reward_samples, query_type, true_delta)
-    mean_weight = np.mean(w_samples, axis=0)
-    normalized_mean_weight = mean_weight / np.linalg.norm(mean_weight)
-    return normalized_mean_weight
-
-
-def save_reward(
-    query_type: str,
-    w_sampler,
-    n_reward_samples: int,
-    outdir: Path,
-    true_delta: Optional[float] = None,
-):
-    np.save(
-        outdir / "mean_reward.npy",
-        make_mode_reward(query_type, w_sampler, n_reward_samples, true_delta),
-    )
-
-
-def update_inputs(a_inputs, b_inputs, inputs: Optional[np.ndarray], outdir: Path) -> np.ndarray:
-    """Adds a new pair of input trajectories (a_inputs, b_inputs) to the inputs list and saves it."""
-    inputs = append(inputs, np.stack([a_inputs, b_inputs]))
-    np.save(outdir / "inputs.npy", inputs)
-    return inputs
-
-
-def append(a: Optional[np.ndarray], b: Union[np.ndarray, int], flat=False) -> np.ndarray:
-    if isinstance(b, np.ndarray) and not flat:
-        b = b.reshape((1, *b.shape))
-
-    if a is None:
-        if isinstance(b, np.ndarray):
-            return b
-        elif isinstance(b, int):
-            return np.array([b])
-    else:
-        if isinstance(b, np.ndarray):
-            return np.append(a, b, axis=0)
-        elif isinstance(b, int):
-            return np.append(a, b)
+from active.simulation_utils import (create_env, get_feedback,
+                                     get_simulated_feedback, run_algo)
+from utils import append, load, make_reward_path, update_inputs
 
 
 def setup(task: str, criterion: str, query_type: str, outdir: Path, delta: Optional[float] = None):

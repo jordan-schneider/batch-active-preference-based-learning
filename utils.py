@@ -1,13 +1,79 @@
 import logging
 import pickle as pkl
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import fire  # type: ignore
 import numpy as np
 from numpy.linalg import norm
 
 from active.sampling import Sampler
+from active.simulation_utils import compute_best, create_env
+
+
+def save_reward(
+    query_type: str,
+    w_sampler,
+    n_reward_samples: int,
+    outdir: Path,
+    true_delta: Optional[float] = None,
+):
+    np.save(
+        outdir / "mean_reward.npy",
+        make_mode_reward(query_type, w_sampler, n_reward_samples, true_delta),
+    )
+
+
+def update_inputs(a_inputs, b_inputs, inputs: Optional[np.ndarray], outdir: Path) -> np.ndarray:
+    """Adds a new pair of input trajectories (a_inputs, b_inputs) to the inputs list and saves it."""
+    inputs = append(inputs, np.stack([a_inputs, b_inputs]))
+    np.save(outdir / "inputs.npy", inputs)
+    return inputs
+
+
+def append(a: Optional[np.ndarray], b: Union[np.ndarray, int], flat=False) -> np.ndarray:
+    if isinstance(b, np.ndarray) and not flat:
+        b = b.reshape((1, *b.shape))
+
+    if a is None:
+        if isinstance(b, np.ndarray):
+            return b
+        elif isinstance(b, int):
+            return np.array([b])
+    else:
+        if isinstance(b, np.ndarray):
+            return np.append(a, b, axis=0)
+        elif isinstance(b, int):
+            return np.append(a, b)
+
+
+def load(outdir: Path, filename: str, overwrite: bool) -> Optional[np.ndarray]:
+    if overwrite:
+        return None
+
+    filepath = outdir / filename
+    if filepath.exists():
+        return np.load(filepath)
+
+    return None
+
+
+def make_mode_reward(
+    query_type: str, w_sampler, n_reward_samples: int, true_delta: Optional[float] = None
+) -> np.ndarray:
+    w_samples, _ = w_sampler.sample_given_delta(n_reward_samples, query_type, true_delta)
+    mean_weight = np.mean(w_samples, axis=0)
+    normalized_mean_weight = mean_weight / np.linalg.norm(mean_weight)
+    return normalized_mean_weight
+
+
+def make_path(reward: np.ndarray, start_state: np.ndarray) -> np.ndarray:
+    simulation_object = create_env("driver")
+    simulation_object.initial_state = (start_state[0], start_state[1])
+    optimal_ctrl = compute_best(simulation_object=simulation_object, w=reward, iter_count=10)
+    # NOTE: Instead of returning a (T,action shape) array, it returns a flat array, expecting you to
+    # reshape it yourself
+    return optimal_ctrl
 
 
 def make_reward_path(reward_path: Union[str, Path]):

@@ -1,5 +1,4 @@
 from pathlib import Path
-from threading import TIMEOUT_MAX
 from typing import List, Optional
 
 import fire  # type: ignore
@@ -8,14 +7,8 @@ from joblib import Parallel, delayed  # type: ignore
 from numpy.random import default_rng
 
 from active.sampling import Sampler
-from active.simulation_utils import compute_best, create_env
-from elicitation import append, load, make_mode_reward
-
-
-def make_path(reward: np.ndarray) -> np.ndarray:
-    simulation_object = create_env("driver")
-    optimal_ctrl = compute_best(simulation_object=simulation_object, w=reward, iter_count=10)
-    return optimal_ctrl
+from active.simulation_utils import create_env
+from utils import append, load, make_mode_reward, make_path
 
 
 def collect(

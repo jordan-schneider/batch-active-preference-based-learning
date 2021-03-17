@@ -61,7 +61,7 @@ def get_feedback(simulation_object, input_A, input_B, query_type):
     return phi_A, phi_B, s
 
 
-def create_env(task):
+def create_env(task: str) -> Simulation :
     if task == "driver":
         return Driver()
     else:
@@ -83,8 +83,10 @@ def func(ctrl_array, *args):
     simulation_object = args[0]
     w = np.array(args[1])
     simulation_object.set_ctrl(ctrl_array)
-    features = simulation_object.get_features()
-    return -np.mean(np.array(features).dot(w))
+    features = np.array(simulation_object.get_features())
+    assert features.shape == (4,)
+    assert w.shape == (4,)
+    return -np.mean(features.dot(w))
 
 
 def compute_best(simulation_object, w, iter_count=10) -> np.ndarray:
