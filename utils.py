@@ -1,7 +1,7 @@
 import logging
 import pickle as pkl
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import fire  # type: ignore
 import numpy as np
@@ -9,6 +9,48 @@ from numpy.linalg import norm
 
 from active.sampling import Sampler
 from active.simulation_utils import compute_best, create_env
+
+
+def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.ndarray:
+    if len(raw_state.shape) == 3:
+        assert raw_state.shape[1:] == (2, 4)
+        assert len(reward_features.shape) == 2
+        assert reward_features.shape[1:] == (
+            4,
+        ), f"reward features shape={reward_features.shape} when state shape={raw_state.shape}"
+        assert raw_state.shape[0] == reward_features.shape[0]
+
+        n = raw_state.shape[0]
+        raw_state = raw_state.reshape(-1, 8)
+        assert raw_state.shape == (n, 8)
+
+        state = np.concatenate((raw_state, reward_features), axis=1)
+    elif len(raw_state.shape) == 2:
+        assert len(reward_features.shape) == 1
+        assert raw_state.shape == (2, 4)
+        raw_state = raw_state.flatten()
+        assert raw_state.shape == (8,)
+
+        state = np.concatenate((raw_state, reward_features))
+
+    return state
+
+
+def parse_replications(replications: Union[str, Tuple[int, ...]]) -> List[int]:
+    if isinstance(replications, tuple):
+        return list(replications)
+    elif isinstance(replications, str):
+        if "-" in replications:
+            assert "," not in replications, "Cannot mix ranges and commas"
+            start_str, stop_str = replications.split("-")
+            start = int(start_str)
+            stop = int(stop_str)
+            return list(range(start, stop + 1))
+        elif "," in replications:
+            assert "-" not in replications, "Cannot mix ranges and commas"
+            return [int(token) for token in replications.split(",")]
+        else:
+            return list(range(1, int(replications) + 1))
 
 
 def save_reward(

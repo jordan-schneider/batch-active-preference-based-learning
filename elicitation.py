@@ -9,9 +9,8 @@ import numpy as np
 from joblib.parallel import Parallel, delayed  # type: ignore
 
 from active.sampling import Sampler
-from active.simulation_utils import (create_env, get_feedback,
-                                     get_simulated_feedback, run_algo)
-from utils import append, load, make_reward_path, update_inputs
+from active.simulation_utils import create_env, get_feedback, get_simulated_feedback, run_algo
+from utils import append, load, make_reward_path, save_reward, update_inputs
 
 
 def setup(task: str, criterion: str, query_type: str, outdir: Path, delta: Optional[float] = None):

@@ -6,7 +6,8 @@ import pickle
 from itertools import product
 from math import log
 from pathlib import Path
-from typing import Dict, Generator, List, Optional, Sequence, Set, Tuple, Union, cast
+from typing import (Dict, Generator, List, Optional, Sequence, Set, Tuple,
+                    Union, cast)
 
 import argh  # type: ignore
 import driver  # type: ignore
@@ -23,16 +24,9 @@ from policy import make_TD3_state
 from random_baseline import make_random_questions
 from TD3.TD3 import TD3, load_td3  # type: ignore
 from test_factory import TestFactory
-from utils import (
-    assert_nonempty,
-    assert_normals,
-    assert_reward,
-    assert_rewards,
-    get_mean_reward,
-    make_path,
-    normalize,
-    orient_normals,
-)
+from utils import (assert_nonempty, assert_normals, assert_reward,
+                   assert_rewards, get_mean_reward, make_path, normalize,
+                   orient_normals, parse_replications)
 
 
 def make_gaussian_rewards(
@@ -452,17 +446,6 @@ def load_elicitation(
     return normals, preferences, input_features
 
 
-def parse_replications(replications: str) -> Tuple[int, int]:
-    if "-" in replications:
-        start_str, stop_str = replications.split("-")
-        start = int(start_str)
-        stop = int(stop_str)
-    else:
-        start = 0
-        stop = int(replications)
-    return start, stop
-
-
 @arg("--epsilons", nargs="+", type=float)
 @arg("--deltas", nargs="+", type=float)
 @arg("--human-samples", nargs="+", type=int)
@@ -489,16 +472,16 @@ def simulated(
     skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
-    replications: Optional[str] = None,
+    replications: Optional[Union[str, Tuple[int, ...]]] = None,
     overwrite: bool = False,
 ) -> None:
     """ Run tests with full data to determine how much reward noise gets """
     logging.basicConfig(level="INFO")
 
     if replications is not None:
-        start, stop = parse_replications(replications)
+        replication_indices = parse_replications(replications)
 
-        for replication in range(int(start), int(stop) + 1):
+        for replication in replication_indices:
             if not (datadir / str(replication)).exists():
                 logging.warning(f"Replication {replication} does not exist, skipping")
                 continue

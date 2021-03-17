@@ -16,32 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 from active.simulation_utils import create_env  # type: ignore
 from TD3.TD3 import TD3, load_td3  # type: ignore
 from TD3.utils import ReplayBuffer  # type: ignore
-from utils import make_path, make_reward_path
-
-
-def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.ndarray:
-    if len(raw_state.shape) == 3:
-        assert raw_state.shape[1:] == (2, 4)
-        assert len(reward_features.shape) == 2
-        assert reward_features.shape[1:] == (
-            4,
-        ), f"reward features shape={reward_features.shape} when state shape={raw_state.shape}"
-        assert raw_state.shape[0] == reward_features.shape[0]
-
-        n = raw_state.shape[0]
-        raw_state = raw_state.reshape(-1, 8)
-        assert raw_state.shape == (n, 8)
-
-        state = np.concatenate((raw_state, reward_features), axis=1)
-    elif len(raw_state.shape == 2):
-        assert len(reward_features.shape) == 1
-        assert raw_state.shape == (2, 4)
-        raw_state = raw_state.flatten()
-        assert raw_state.shape == (8,)
-
-        state = np.concatenate((raw_state, reward_features))
-
-    return state
+from utils import make_path, make_reward_path, make_TD3_state, parse_replications
 
 
 def make_outdir(outdir: Union[str, Path], timestamp: bool = False) -> Path:
@@ -69,14 +44,14 @@ def train(
     horizon: int = 50,
     timestamp: bool = False,
     random_start: bool = False,
-    n_replications: Optional[int] = None,
+    replications: Optional[str] = None,
     plot_episodes: bool = False,
     verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ) -> None:
     logging.basicConfig(level=verbosity)
 
-    if n_replications is not None:
-        n_replications = int(n_replications)  # Fire is bad about optional arguments
+    if replications is not None:
+        replication_indices = parse_replications(replications)
 
         reward_dir, reward_name = make_reward_path(reward_path)
         Parallel(n_jobs=-2)(
@@ -96,7 +71,7 @@ def train(
                 timestamp=timestamp,
                 random_start=random_start,
             )
-            for i in range(1, n_replications + 1)
+            for i in replication_indices
         )
         exit()
 
@@ -107,6 +82,7 @@ def train(
 
     reward_weights = np.load(reward_path)
     env = gym.make("driver-v1", reward=reward_weights, horizon=horizon, random_start=random_start)
+    action_shape = env.action_space.sample().shape
     logging.info("Initialized env")
 
     if (outdir / (model_name + "_actor")).exists():
@@ -129,6 +105,7 @@ def train(
     best_return = float("-inf")
     for t in range(n_timesteps):
         action = pick_action(t, n_random_timesteps, env, td3, state, exploration_noise)
+        assert action.shape == action_shape, f"Action shape={action.shape}, expected={action_shape}"
         next_raw_state, reward, done, info = env.step(action)
         log_step(next_raw_state, action, reward, info, log_iter=t, writer=writer)
 
