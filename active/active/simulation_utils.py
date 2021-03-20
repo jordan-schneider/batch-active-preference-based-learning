@@ -9,6 +9,17 @@ from driver.simulator import Simulation  # type: ignore
 from active import algos
 
 
+def make_opt_traj(reward: np.ndarray, start_state: Optional[np.ndarray] = None) -> np.ndarray:
+    simulation_object = Driver()
+    if start_state is not None:
+        simulation_object.initial_state = (start_state[0], start_state[1])
+    optimal_ctrl = compute_best(simulation_object=simulation_object, w=reward, iter_count=10)
+    # NOTE: Instead of returning a (T,action shape) array, it returns a flat array, expecting you to
+    # reshape it yourself
+    logging.info(f"opt_ctrl shape={optimal_ctrl.shape}")
+    return optimal_ctrl
+
+
 def get_simulated_feedback(
     simulation: Simulation,
     input_A: np.ndarray,

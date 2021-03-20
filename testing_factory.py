@@ -56,10 +56,7 @@ class TestFactory:
         self.skip_redundancy_filtering = skip_redundancy_filtering
 
     def sample_rewards(
-        self,
-        a_phis: np.ndarray,
-        b_phis: np.ndarray,
-        preferences: np.ndarray,
+        self, a_phis: np.ndarray, b_phis: np.ndarray, preferences: np.ndarray,
     ) -> np.ndarray:
         """ Samples n_samples rewards via MCMC. """
         w_sampler = Sampler(self.reward_dimension)
@@ -175,7 +172,7 @@ class TestFactory:
             # Remove redundant halfspaces
             filtered_normals, constraint_indices = remove_redundant_constraints(filtered_normals)
 
-            constraint_indices = np.array(constraint_indices, dtype=np.int)
+            constraint_indices = np.array(constraint_indices, dtype=int)
             indices = indices[constraint_indices]
             assert np.all(normals[indices] == filtered_normals)
 

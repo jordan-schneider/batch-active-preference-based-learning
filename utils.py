@@ -9,7 +9,6 @@ import numpy as np
 from numpy.linalg import norm
 
 from active.sampling import Sampler
-from active.simulation_utils import compute_best, create_env
 
 
 def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.ndarray:
@@ -136,17 +135,6 @@ def make_td3_paths(td3_path: Path, replication_indices: List[int]) -> List[Path]
         path = td3_dir / prefix
         paths.append(path)
     return paths
-
-
-def make_opt_traj(reward: np.ndarray, start_state: Optional[np.ndarray] = None) -> np.ndarray:
-    simulation_object = create_env("driver")
-    if start_state is not None:
-        simulation_object.initial_state = (start_state[0], start_state[1])
-    optimal_ctrl = compute_best(simulation_object=simulation_object, w=reward, iter_count=10)
-    # NOTE: Instead of returning a (T,action shape) array, it returns a flat array, expecting you to
-    # reshape it yourself
-    logging.info(f"opt_ctrl shape={optimal_ctrl.shape}")
-    return optimal_ctrl
 
 
 def make_reward_path(reward_path: Union[str, Path]):

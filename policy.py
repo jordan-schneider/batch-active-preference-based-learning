@@ -12,16 +12,10 @@ from joblib import Parallel, delayed  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
 from torch.utils.tensorboard import SummaryWriter
 
-from active.simulation_utils import create_env  # type: ignore
+from active.simulation_utils import create_env, make_opt_traj  # type: ignore
 from TD3.TD3 import TD3, load_td3  # type: ignore
 from TD3.utils import ReplayBuffer  # type: ignore
-from utils import (
-    make_opt_traj,
-    make_reward_path,
-    make_td3_paths,
-    make_TD3_state,
-    parse_replications,
-)
+from utils import make_reward_path, make_td3_paths, make_TD3_state, parse_replications
 
 
 def make_outdir(outdir: Union[str, Path], timestamp: bool = False) -> Path:

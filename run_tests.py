@@ -20,7 +20,7 @@ from joblib.parallel import _verbosity_filter  # type: ignore
 from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
-from active.simulation_utils import create_env
+from active.simulation_utils import create_env, make_opt_traj
 from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
 from TD3.TD3 import TD3, load_td3  # type: ignore
@@ -31,7 +31,6 @@ from utils import (
     assert_reward,
     assert_rewards,
     get_mean_reward,
-    make_opt_traj,
     normalize,
     orient_normals,
     parse_replications,

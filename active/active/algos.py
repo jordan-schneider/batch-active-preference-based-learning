@@ -1,5 +1,5 @@
 import numpy as np
-import scipy.optimize as opt
+import scipy.optimize as opt  # type: ignore
 
 
 def volume_objective_psi(psi_set, w_samples, delta_samples):
