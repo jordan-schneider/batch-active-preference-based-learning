@@ -8,7 +8,7 @@ from numpy.random import default_rng
 
 from active.sampling import Sampler
 from active.simulation_utils import create_env
-from utils import append, load, make_mode_reward, make_path
+from utils import append, load, make_mode_reward, make_opt_traj
 
 
 def collect(
@@ -108,7 +108,7 @@ def collect(
     if num_new_paths > 0:
         new_paths = np.array(
             Parallel(n_jobs=-2)(
-                delayed(make_path)(reward) for reward in out_rewards[new_paths_index:]
+                delayed(make_opt_traj)(reward) for reward in out_rewards[new_paths_index:]
             )
         )
         paths = append(paths, new_paths, flat=True)

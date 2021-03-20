@@ -6,27 +6,36 @@ import pickle
 from itertools import product
 from math import log
 from pathlib import Path
-from typing import (Dict, Generator, List, Optional, Sequence, Set, Tuple,
-                    Union, cast)
+from typing import Dict, Generator, List, Literal, Optional, Sequence, Set, Tuple, Union, cast
 
 import argh  # type: ignore
-import driver  # type: ignore
-import gym  # type: ignore
+import driver
+import gym
 import numpy as np
 from argh import arg
+from driver.gym_driver import GymDriver
 from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
+from joblib.parallel import _verbosity_filter  # type: ignore
 from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
 from active.simulation_utils import create_env
-from policy import make_TD3_state
+from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
 from TD3.TD3 import TD3, load_td3  # type: ignore
 from test_factory import TestFactory
-from utils import (assert_nonempty, assert_normals, assert_reward,
-                   assert_rewards, get_mean_reward, make_path, normalize,
-                   orient_normals, parse_replications)
+from utils import (
+    assert_nonempty,
+    assert_normals,
+    assert_reward,
+    assert_rewards,
+    get_mean_reward,
+    make_opt_traj,
+    normalize,
+    orient_normals,
+    parse_replications,
+)
 
 
 def make_gaussian_rewards(
@@ -129,17 +138,20 @@ def find_reward_boundary(
 
 
 def rewards_aligned(
-    td3: TD3, env: Env, test_rewards: np.ndarray, epsilon: float, n_samples: int = int(1e4)
+    td3: TD3, env: Env, test_rewards: np.ndarray, epsilon: float, n_samples: int = int(1e4),
 ):
+    state_shape = env.observation_space.sample().shape
+    action_shape = env.action_space.sample().shape
+    n_rewards = len(test_rewards)
+
     raw_states = np.array([env.observation_space.sample() for _ in range(n_samples)])
-    reward_features = env.get_feature_batch(raw_states)
+    assert raw_states.shape == (n_samples, *state_shape)
+    reward_features = GymDriver.get_feature_batch(raw_states)
     states = make_TD3_state(raw_states, reward_features)
     opt_actions = td3.select_action(states)
     opt_values = td3.critic.Q1(states, opt_actions).reshape(-1)
 
-    state_shape = env.observation_space.sample().shape
     reward_feature_shape = reward_features[0].shape
-    action_shape = env.action_space.sample().shape
 
     assert states.shape == (
         n_samples,
@@ -151,16 +163,16 @@ def rewards_aligned(
     ), f"Actions shape={opt_actions.shape}, expected={(n_samples, *action_shape)}"
     assert opt_values.shape == (n_samples,), f"Value shape={opt_values.shape}"
 
-    trajs = np.array(
-        [make_path(reward, state) for reward, state in zip(test_rewards, raw_states)]
-    ).reshape(n_samples, -1, *action_shape)
-    actions = trajs[:, 0]
-    assert actions.shape == (n_samples, *action_shape), f"Actions shape={actions.shape}"
+    actions = np.empty((n_rewards, n_samples, *action_shape))
+    for i, reward in enumerate(test_rewards):
+        for j, state in enumerate(raw_states):
+            actions[i, j] = make_opt_traj(reward, state).reshape(-1, *action_shape)[0]
+
     values = td3.critic.Q1(states, actions).reshape(-1)
 
-    assert values.shape == (n_samples,), f"Value shape={values.shape}"
+    assert values.shape == (n_rewards, n_samples,), f"Value shape={values.shape}"
 
-    alignment = opt_values - values < epsilon
+    alignment = np.all(opt_values - values < epsilon, axis=1)
     return alignment
 
 
@@ -285,6 +297,7 @@ def run_human_experiment(
     n_human_samples: int,
     factory: TestFactory,
     use_equiv: bool,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ) -> Tuple[np.ndarray, np.ndarray, Experiment]:
     """Distills a set of normals and preferences into a test using the factory, and runs that test on test_rewards
 
@@ -302,6 +315,7 @@ def run_human_experiment(
     Returns:
         Tuple[np.ndarray, np.ndarray, Experiment]: indices of the selected test questions, test results for each reward, and experimental hyperparameters
     """
+    logging.basicConfig(level=verbosity)
     if n_human_samples == -1:
         n_human_samples == normals.shape[0]
     filtered_normals = normals[:n_human_samples]
@@ -334,6 +348,7 @@ def run_gt_experiment(
     preferences: np.ndarray,
     outdir: Path,
     model_dir: Path,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ) -> Tuple[np.ndarray, np.ndarray, Experiment]:
     experiment = (epsilon, delta, n_human_samples)
 
@@ -343,11 +358,13 @@ def run_gt_experiment(
     logging.basicConfig(
         filename=logdir / f"{epsilon}.{delta}.{n_human_samples}.log",
         filemode="w",
-        level=logging.INFO,
+        level=verbosity,
         force=True,
     )
 
     logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n_human_samples}")
+
+    # TODO(joschnei): Move model load out of parallel step to save GPU ram
 
     # TODO(joschnei): Really need to make this a fixed set common between comparisons.
     rewards, aligned = find_reward_boundary(
@@ -474,14 +491,16 @@ def simulated(
     skip_redundancy_filtering: bool = False,
     replications: Optional[Union[str, Tuple[int, ...]]] = None,
     overwrite: bool = False,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ) -> None:
     """ Run tests with full data to determine how much reward noise gets """
-    logging.basicConfig(level="INFO")
+    logging.basicConfig(level=verbosity)
 
     if replications is not None:
         replication_indices = parse_replications(replications)
+        model_dirs = make_td3_paths(model_dir, replication_indices)
 
-        for replication in replication_indices:
+        for replication, model_dir in zip(replication_indices, model_dirs):
             if not (datadir / str(replication)).exists():
                 logging.warning(f"Replication {replication} does not exist, skipping")
                 continue
@@ -499,6 +518,7 @@ def simulated(
                 flags_name=flags_name,
                 datadir=datadir / str(replication),
                 outdir=outdir / str(replication),
+                model_dir=model_dir,
                 use_equiv=use_equiv,
                 use_mean_reward=use_mean_reward,
                 use_random_test_questions=use_random_test_questions,
@@ -607,6 +627,7 @@ def simulated(
             preferences=preferences,
             outdir=outdir,
             model_dir=model_dir,
+            verbosity=verbosity,
         )
         for epsilon, delta, n in experiments
     ):

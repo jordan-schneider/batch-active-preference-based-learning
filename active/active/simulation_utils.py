@@ -61,7 +61,7 @@ def get_feedback(simulation_object, input_A, input_B, query_type):
     return phi_A, phi_B, s
 
 
-def create_env(task: str) -> Simulation :
+def create_env(task: str) -> Simulation:
     if task == "driver":
         return Driver()
     else:
@@ -108,7 +108,7 @@ def compute_best(simulation_object, w, iter_count=10) -> np.ndarray:
             opt_val = temp_res[1]
     if optimal_ctrl is None:
         raise RuntimeError("No solution found.")
-    logging.info(f"Optimal value=-{opt_val}")
+    logging.info(f"Optimal value={-opt_val}")
     return optimal_ctrl
 
 

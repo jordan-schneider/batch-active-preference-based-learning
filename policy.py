@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import driver  # type: ignore
 import fire  # type: ignore
@@ -16,7 +16,13 @@ from torch.utils.tensorboard import SummaryWriter
 from active.simulation_utils import create_env  # type: ignore
 from TD3.TD3 import TD3, load_td3  # type: ignore
 from TD3.utils import ReplayBuffer  # type: ignore
-from utils import make_path, make_reward_path, make_TD3_state, parse_replications
+from utils import (
+    make_opt_traj,
+    make_reward_path,
+    make_td3_paths,
+    make_TD3_state,
+    parse_replications,
+)
 
 
 def make_outdir(outdir: Union[str, Path], timestamp: bool = False) -> Path:
@@ -146,11 +152,7 @@ def train(
             td3.save(str(outdir / model_name))
 
             eval_return = eval(
-                reward_weights,
-                td3_dir=outdir / model_name,
-                writer=writer,
-                log_iter=t // save_period,
-                horizon=horizon,
+                reward_weights, td3=td3, writer=writer, log_iter=t // save_period, horizon=horizon,
             )
             if eval_return > best_return:
                 best_return = eval_return
@@ -237,24 +239,21 @@ def make_td3(
 
 def eval(
     reward_weights: np.ndarray,
-    td3_dir: Path,
+    td3: TD3,
     writer: Optional[SummaryWriter] = None,
     log_iter: Optional[int] = None,
     horizon: int = 50,
 ):
-    logging.basicConfig(level="INFO")
     logging.info("Evaluating the policy")
     env = gym.make("driver-v1", reward=reward_weights, horizon=horizon)
 
-    td3 = load_td3(env, filename=td3_dir, writer=writer)
-
     raw_state = env.reset()
     state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
-    rewards = np.empty((horizon,))
+    rewards = []
     for t in range(horizon):
         raw_state, reward, done, info = env.step(td3.select_action(state))
         state = make_TD3_state(raw_state=raw_state, reward_features=info["reward_features"])
-        rewards[t] = reward
+        rewards.append(reward)
     assert done
     empirical_return = np.mean(rewards)
     if writer is not None:
@@ -264,10 +263,13 @@ def eval(
 
 
 def compare(reward_path: Path, td3_dir: Path, horizon: int = 50):
+    logging.basicConfig(level="INFO")
     reward_weights = np.load(reward_path)
-    empirical_return = eval(reward_weights, td3_dir, horizon=horizon)
+    env = gym.make("driver-v1", reward=reward_weights, horizon=horizon)
+    td3 = load_td3(env, td3_dir)
+    empirical_return = eval(reward_weights, td3, horizon=horizon)
 
-    opt_traj = make_path(reward_weights)
+    opt_traj = make_opt_traj(reward_weights)
     simulation_object = create_env("driver")
     simulation_object.set_ctrl(opt_traj)
     features = simulation_object.get_features()
@@ -281,7 +283,25 @@ def refine(
     horizon: int = 50,
     env_iters: int = int(1e5),
     batch_size: int = 100,
+    replications: Optional[Union[str, Tuple[int, ...]]] = None,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ):
+    logging.basicConfig(level=verbosity)
+    if replications is not None:
+        replication_indices = parse_replications(replications)
+        reward_dir, reward_name = make_reward_path(reward_path)
+        td3_paths = make_td3_paths(Path(td3_dir), replication_indices)
+        Parallel(n_jobs=-2)(
+            delayed(refine)(
+                reward_path=reward_dir / str(i) / reward_name,
+                td3_dir=td3_path,
+                horizon=horizon,
+                env_iters=env_iters,
+                batch_size=batch_size,
+            )
+            for i, td3_path in zip(replication_indices, td3_paths)
+        )
+        exit()
     td3_dir = Path(td3_dir)
     writer = SummaryWriter(log_dir=td3_dir.parent, filename_suffix="refine")
 

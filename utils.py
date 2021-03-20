@@ -3,6 +3,7 @@ import pickle as pkl
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
+import arrow
 import fire  # type: ignore
 import numpy as np
 from numpy.linalg import norm
@@ -109,12 +110,42 @@ def make_mode_reward(
     return normalized_mean_weight
 
 
-def make_path(reward: np.ndarray, start_state: np.ndarray) -> np.ndarray:
+def make_td3_paths(td3_path: Path, replication_indices: List[int]) -> List[Path]:
+    """ Selects the most recent policy in each replication folder. """
+    paths = list()
+    for i in replication_indices:
+        replication_dir = td3_path / str(i)
+        # Each replication folder contains directories whose names are timestamps
+        children = [child.name for child in replication_dir.iterdir() if child.is_dir()]
+        most_recent_child = children[np.argmax([arrow.get(child) for child in children])]
+        td3_dir = replication_dir / most_recent_child
+        # Within each dir is a set of best_X_actor, best_X_critic, etc files
+        # We need to provide best_X to the path
+        replication_files = list(td3_dir.iterdir())
+        assert len(replication_files) > 0
+        best_files = [child.name for child in replication_files if "best_" in child.name]
+        if len(best_files) == 0:
+            # Legacy pathway for runs that don't have a best
+            logging.warning("Best model not found, falling back to last model.")
+            model_files = [child.name for child in replication_files if "_critic" in child.name]
+            model_file = model_files[0]
+            prefix = model_file.split("_")[0]
+        else:
+            best_file = best_files[0]
+            prefix = "_".join(best_file.split("_")[0:2])
+        path = td3_dir / prefix
+        paths.append(path)
+    return paths
+
+
+def make_opt_traj(reward: np.ndarray, start_state: Optional[np.ndarray] = None) -> np.ndarray:
     simulation_object = create_env("driver")
-    simulation_object.initial_state = (start_state[0], start_state[1])
+    if start_state is not None:
+        simulation_object.initial_state = (start_state[0], start_state[1])
     optimal_ctrl = compute_best(simulation_object=simulation_object, w=reward, iter_count=10)
     # NOTE: Instead of returning a (T,action shape) array, it returns a flat array, expecting you to
     # reshape it yourself
+    logging.info(f"opt_ctrl shape={optimal_ctrl.shape}")
     return optimal_ctrl
 
 
