@@ -3,11 +3,11 @@ from typing import List, Optional
 
 import fire  # type: ignore
 import numpy as np
+from driver.models import Driver
 from joblib import Parallel, delayed  # type: ignore
 from numpy.random import default_rng
 
 from active.sampling import Sampler
-from active.simulation_utils import create_env
 from utils import append, load, make_mode_reward, make_opt_traj
 
 
@@ -44,6 +44,8 @@ def collect(
     new_rewards_index = out_rewards.shape[0] if out_rewards is not None else 0
     num_new_rewards = n_rewards - new_rewards_index
 
+    env = Driver()
+
     if num_new_rewards > 0:
         if test_reward_path is not None:
             rewards = np.load(test_reward_path)[new_rewards_index:num_new_rewards]
@@ -64,7 +66,7 @@ def collect(
             mean_reward = make_mode_reward(
                 query_type="strict",
                 true_delta=1.1,
-                w_sampler=Sampler(create_env("driver").num_of_features),
+                w_sampler=Sampler(env.num_of_features),
                 n_reward_samples=100,
             )
             assert np.all(np.isfinite(mean_reward))
@@ -74,13 +76,13 @@ def collect(
             assert np.all(np.isfinite(rewards))
         elif use_random:
             rewards = default_rng().normal(
-                loc=0, scale=1, size=(num_new_rewards, create_env("driver").num_of_features)
+                loc=0, scale=1, size=(num_new_rewards, env.num_of_features)
             )
             rewards = rewards / np.linalg.norm(rewards)
         elif use_plausible:
             # Generate uniform rewards with plausible weights i.e. ones with the right sign
             rewards = default_rng().normal(
-                loc=0, scale=1, size=(num_new_rewards, create_env("driver").num_of_features)
+                loc=0, scale=1, size=(num_new_rewards, env.num_of_features)
             )
             rewards = rewards / np.linalg.norm(rewards)
 
@@ -122,10 +124,9 @@ def collect(
     if skip_human:
         exit()
 
-    simulation_object = create_env("driver")
     for path in paths[new_gt_index:]:
-        simulation_object.set_ctrl(path)
-        simulation_object.watch(1)
+        env.set_ctrl(path)
+        env.watch(1)
 
         alignment = input("Aligned (y/n):").lower()
         while alignment not in ["y", "n"]:

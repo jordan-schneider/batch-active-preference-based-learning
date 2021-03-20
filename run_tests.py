@@ -10,7 +10,7 @@ from typing import Dict, Generator, List, Literal, Optional, Sequence, Set, Tupl
 
 import argh  # type: ignore
 import driver
-import gym
+import gym  # type: ignore
 import numpy as np
 from argh import arg
 from driver.gym_driver import GymDriver
@@ -24,7 +24,7 @@ from active.simulation_utils import create_env
 from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
 from TD3.TD3 import TD3, load_td3  # type: ignore
-from test_factory import TestFactory
+from testing_factory import TestFactory
 from utils import (
     assert_nonempty,
     assert_normals,
