@@ -12,11 +12,11 @@ import argh  # type: ignore
 import driver
 import gym  # type: ignore
 import numpy as np
+import torch  # type: ignore
 from argh import arg
 from driver.gym_driver import GymDriver
 from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
-from joblib.parallel import _verbosity_filter  # type: ignore
 from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
@@ -60,59 +60,24 @@ def make_gaussian_rewards(
     return rewards
 
 
-def old_find_reward_boundary(
-    normals: np.ndarray, n_rewards: int, reward: np.ndarray, epsilon: float, use_equiv: bool,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """ Generates n_rewards reward vectors and determines which are aligned. """
-    assert_normals(normals, use_equiv)
-    assert n_rewards > 0
-    assert epsilon >= 0.0
-    assert_reward(reward, use_equiv)
-
-    n_reward_features = normals.shape[1]
-
-    cov = 1.0
-
-    rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
-    normals = normals[reward @ normals.T > epsilon]
-    ground_truth_alignment = cast(np.ndarray, np.all(rewards @ normals.T > 0, axis=1))
-    mean_agree = np.mean(ground_truth_alignment)
-
-    while mean_agree > 0.55 or mean_agree < 0.45:
-        if mean_agree > 0.55:
-            cov *= 1.1
-        else:
-            cov /= 1.1
-        if not np.isfinite(cov) or cov <= 0.0 or cov >= 100.0:
-            # TODO(joschnei): Break is a code smell
-            logging.warning(f"cov={cov}, using last good batch of rewards.")
-            break
-        rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=reward, cov=cov)
-        normals = normals[reward @ normals.T > epsilon]
-        ground_truth_alignment = cast(np.ndarray, np.all(rewards @ normals.T > 0, axis=1))
-        mean_agree = np.mean(ground_truth_alignment)
-
-    assert ground_truth_alignment.shape == (n_rewards,)
-    assert rewards.shape == (n_rewards, n_reward_features)
-
-    return rewards, ground_truth_alignment
-
-
 def find_reward_boundary(
     true_reward: np.ndarray,
-    td3_dir: Path,
+    td3: TD3,
     n_rewards: int,
     use_equiv: bool,
     epsilon: float,
     n_samples: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    # TODO(joschnei): If my bottleneck is GPU, then it makes sense to compute the proposed rewards
+    # for all epsilon first, and then feed them to the model all at once, check, and redo the
+    # process instead of computing each different value of epsilon independently.
+
     # TODO(joschnei): Un-hardcode horizon.
     env = gym.make("driver-v1", reward=true_reward, horizon=50)
-    td3 = load_td3(env, td3_dir)
 
     cov = 1.0
     rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
-    alignment = rewards_aligned(td3, env, rewards, epsilon, n_samples).cpu().numpy()
+    alignment = rewards_aligned(td3, env, rewards, epsilon, n_samples)
     mean_agree = np.mean(alignment)
 
     while mean_agree > 0.55 or mean_agree < 0.45:
@@ -125,7 +90,7 @@ def find_reward_boundary(
             logging.warning(f"cov={cov}, using last good batch of rewards.")
             break
         rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
-        alignment = rewards_aligned(td3, env, rewards, epsilon, n_samples).cpu().numpy()
+        alignment = rewards_aligned(td3, env, rewards, epsilon, n_samples)
         mean_agree = np.mean(alignment)
 
     assert alignment.shape == (
@@ -137,41 +102,47 @@ def find_reward_boundary(
 
 
 def rewards_aligned(
-    td3: TD3, env: Env, test_rewards: np.ndarray, epsilon: float, n_samples: int = int(1e4),
-):
-    state_shape = env.observation_space.sample().shape
-    action_shape = env.action_space.sample().shape
-    n_rewards = len(test_rewards)
+    td3: TD3, env: Env, test_rewards: np.ndarray, epsilon: float, n_test_states: int = int(1e4),
+) -> np.ndarray:
+    with torch.no_grad():
+        # TODO(joschnei): Profile this extensively. I think finding an optimal traj is taking too long.
+        state_shape = env.observation_space.sample().shape
+        action_shape = env.action_space.sample().shape
+        n_rewards = len(test_rewards)
 
-    raw_states = np.array([env.observation_space.sample() for _ in range(n_samples)])
-    assert raw_states.shape == (n_samples, *state_shape)
-    reward_features = GymDriver.get_feature_batch(raw_states)
-    states = make_TD3_state(raw_states, reward_features)
-    opt_actions = td3.select_action(states)
-    opt_values = td3.critic.Q1(states, opt_actions).reshape(-1)
+        raw_states = np.array([env.observation_space.sample() for _ in range(n_test_states)])
+        assert raw_states.shape == (n_test_states, *state_shape)
+        reward_features = GymDriver.get_feature_batch(raw_states)
+        states = make_TD3_state(raw_states, reward_features)
+        opt_actions = td3.select_action(states)
+        opt_values: np.ndarray = td3.critic.Q1(states, opt_actions).reshape(
+            n_test_states
+        ).cpu().numpy()
 
-    reward_feature_shape = reward_features[0].shape
+        reward_feature_shape = reward_features[0].shape
 
-    assert states.shape == (
-        n_samples,
-        np.prod(state_shape) + np.prod(reward_feature_shape),
-    ), f"States shape={states.shape}"
-    assert opt_actions.shape == (
-        n_samples,
-        *action_shape,
-    ), f"Actions shape={opt_actions.shape}, expected={(n_samples, *action_shape)}"
-    assert opt_values.shape == (n_samples,), f"Value shape={opt_values.shape}"
+        assert states.shape == (
+            n_test_states,
+            np.prod(state_shape) + np.prod(reward_feature_shape),
+        ), f"States shape={states.shape}"
+        assert opt_actions.shape == (
+            n_test_states,
+            *action_shape,
+        ), f"Actions shape={opt_actions.shape}, expected={(n_test_states, *action_shape)}"
 
-    actions = np.empty((n_rewards, n_samples, *action_shape))
-    for i, reward in enumerate(test_rewards):
-        for j, state in enumerate(raw_states):
-            actions[i, j] = make_opt_traj(reward, state).reshape(-1, *action_shape)[0]
+        actions = np.empty((n_rewards, n_test_states, *action_shape))
+        for i, reward in enumerate(test_rewards):
+            for j, state in enumerate(raw_states):
+                actions[i, j] = make_opt_traj(reward, state).reshape(-1, *action_shape)[0]
 
-    values = td3.critic.Q1(states, actions).reshape(-1)
+        values: np.ndarray = (
+            td3.critic.Q1(np.tile(states, (n_rewards, 1, 1)), actions)
+            .reshape(n_rewards, n_test_states)
+            .cpu()
+            .numpy()
+        )
 
-    assert values.shape == (n_rewards, n_samples,), f"Value shape={values.shape}"
-
-    alignment = np.all(opt_values - values < epsilon, axis=1)
+        alignment = np.all(opt_values - values < epsilon, axis=1)
     return alignment
 
 
@@ -335,9 +306,8 @@ def run_human_experiment(
 
 def run_gt_experiment(
     normals: np.ndarray,
-    n_rewards: int,
-    n_traj_samples: int,
-    reward: np.ndarray,
+    test_rewards: np.ndarray,
+    test_reward_alignment: np.ndarray,
     epsilon: float,
     delta: float,
     use_equiv: bool,
@@ -346,7 +316,6 @@ def run_gt_experiment(
     input_features: np.ndarray,
     preferences: np.ndarray,
     outdir: Path,
-    model_dir: Path,
     verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ) -> Tuple[np.ndarray, np.ndarray, Experiment]:
     experiment = (epsilon, delta, n_human_samples)
@@ -360,21 +329,9 @@ def run_gt_experiment(
         level=verbosity,
         force=True,
     )
-
     logging.info(f"Working on epsilon={epsilon}, delta={delta}, n={n_human_samples}")
 
-    # TODO(joschnei): Move model load out of parallel step to save GPU ram
-
     # TODO(joschnei): Really need to make this a fixed set common between comparisons.
-    rewards, aligned = find_reward_boundary(
-        true_reward=reward,
-        td3_dir=model_dir,
-        n_rewards=n_rewards,
-        use_equiv=use_equiv,
-        epsilon=epsilon,
-        n_samples=n_traj_samples,
-    )
-    logging.info(f"aligned={np.sum(aligned)}, unaligned={aligned.shape[0] - np.sum(aligned)}")
 
     filtered_normals = normals[:n_human_samples]
     filtered_normals, indices = factory.filter_halfplanes(
@@ -386,7 +343,10 @@ def run_gt_experiment(
     )
 
     confusion = eval_test(
-        normals=filtered_normals, rewards=rewards, aligned=aligned, use_equiv=use_equiv
+        normals=filtered_normals,
+        rewards=test_rewards,
+        aligned=test_reward_alignment,
+        use_equiv=use_equiv,
     )
 
     assert confusion.shape == (2, 2)
@@ -447,9 +407,9 @@ def dedup(
 
 def load_elicitation(
     datadir: Path,
-    normals_name: Path,
-    preferences_name: Path,
-    input_features_name: Path,
+    normals_name: str,
+    preferences_name: str,
+    input_features_name: str,
     n_reward_features: int,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     normals = np.load(datadir / normals_name)
@@ -457,8 +417,8 @@ def load_elicitation(
     input_features = np.load(datadir / input_features_name)
 
     assert_normals(normals, False, n_reward_features)
-
     assert_nonempty(normals, preferences, input_features)
+
     return normals, preferences, input_features
 
 
@@ -471,7 +431,7 @@ def simulated(
     n_rewards: int = 100,
     human_samples: List[int] = [1],
     n_reward_samples: int = 1000,
-    n_traj_samples: int = 1000,
+    n_test_states: int = 1000,
     input_features_name: Path = Path("input_features.npy"),
     normals_name: Path = Path("normals.npy"),
     preferences_name: Path = Path("preferences.npy"),
@@ -539,8 +499,8 @@ def simulated(
     flags = pickle.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
     equiv_probability = flags["equiv_size"]
-    sim = create_env(flags["task"])
-    n_reward_features = sim.num_of_features
+    env = create_env(flags["task"])
+    n_reward_features = env.num_of_features
 
     elicited_normals, elicited_preferences, elicited_input_features = load_elicitation(
         datadir, normals_name, preferences_name, input_features_name, n_reward_features
@@ -600,7 +560,7 @@ def simulated(
             reward_iterations=flags["reward_iterations"],
             query_type=query_type,
             equiv_size=flags["equiv_size"],
-            sim=sim,
+            sim=env,
             use_equiv=use_equiv,
         )
         assert_normals(normals, use_equiv)
@@ -611,12 +571,22 @@ def simulated(
             elicited_normals, elicited_preferences, use_equiv, n_reward_features
         )
 
+    test_rewards = make_test_rewards(
+        epsilons=epsilons,
+        true_reward=true_reward,
+        n_rewards=n_rewards,
+        n_test_states=n_test_states,
+        model_dir=model_dir,
+        outdir=outdir,
+        use_equiv=use_equiv,
+        overwrite=overwrite,
+    )
+
     for indices, confusion, experiment in Parallel(n_jobs=-2)(
         delayed(run_gt_experiment)(
             normals=normals,
-            n_rewards=n_rewards,
-            n_traj_samples=n_traj_samples,
-            reward=true_reward,
+            test_rewards=test_rewards[epsilon][0],
+            test_reward_alignment=test_rewards[epsilon][1],
             epsilon=epsilon,
             delta=delta,
             use_equiv=use_equiv,
@@ -625,7 +595,6 @@ def simulated(
             input_features=input_features,
             preferences=preferences,
             outdir=outdir,
-            model_dir=model_dir,
             verbosity=verbosity,
         )
         for epsilon, delta, n in experiments
@@ -635,6 +604,36 @@ def simulated(
 
     pickle.dump(confusions, open(confusion_path, "wb"))
     pickle.dump(minimal_tests, open(test_path, "wb"))
+
+
+def make_test_rewards(
+    epsilons: Sequence[float],
+    true_reward: np.ndarray,
+    n_rewards: int,
+    n_test_states: int,
+    model_dir: Path,
+    outdir: Path,
+    use_equiv: bool = False,
+    overwrite: bool = False,
+):
+    env = gym.make("driver-v1", reward=np.zeros(4,), horizon=50)
+    model = load_td3(env, model_dir)
+    test_rewards = load(outdir / "test_rewards.pkl", overwrite=overwrite)
+    new_epsilons = set(epsilons) - test_rewards.keys()
+    test_rewards: Dict[float, Tuple[np.ndarray, np.ndarray]] = {
+        epsilon: find_reward_boundary(
+            true_reward=true_reward,
+            td3=model,
+            n_rewards=n_rewards,
+            use_equiv=use_equiv,
+            epsilon=epsilon,
+            n_samples=n_test_states,
+        )
+        for epsilon in new_epsilons
+    }
+    pickle.dump(test_rewards, open(outdir / "test_rewards.pkl", "wb"))
+    del model  # Manually free GPU memory allocation, just in case
+    return test_rewards
 
 
 def make_random_test(
