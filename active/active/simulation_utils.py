@@ -3,21 +3,35 @@ from typing import Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
-from driver.models import Driver  # type: ignore
-from driver.simulator import Simulation  # type: ignore
+from driver.car import LegacyPlanCar, LegacyPlannerCar
+from driver.legacy.models import Driver  # type: ignore
+from driver.legacy.simulator import Simulation  # type: ignore
+from driver.world import ThreeLaneCarWorld
 
 from active import algos
 
 
-def make_opt_traj(reward: np.ndarray, start_state: Optional[np.ndarray] = None) -> np.ndarray:
-    simulation_object = Driver()
-    if start_state is not None:
-        simulation_object.initial_state = (start_state[0], start_state[1])
-    optimal_ctrl = compute_best(simulation_object=simulation_object, w=reward, iter_count=10)
-    # NOTE: Instead of returning a (T,action shape) array, it returns a flat array, expecting you to
-    # reshape it yourself
-    logging.info(f"opt_ctrl shape={optimal_ctrl.shape}")
-    return optimal_ctrl
+def make_opt_traj(
+    reward: np.ndarray, start_state: Optional[np.ndarray] = None, n_planner_iter: int = 10
+) -> np.ndarray:
+    world = ThreeLaneCarWorld()
+    if start_state is None:
+        main_init = np.array([0.0, -0.3, np.pi / 2.0, 0.4])
+        other_init = None
+    else:
+        assert start_state.shape == (2, 4)
+        main_init, other_init = start_state[0], start_state[1]
+    planner_car = LegacyPlannerCar(
+        env=world,
+        init_state=main_init,
+        horizon=50,
+        weights=reward,
+        planner_args={"n_iter": n_planner_iter},
+    )
+    other_car = LegacyPlanCar(env=world, init_state=other_init)
+    world.add_cars([planner_car, other_car])
+    plan = planner_car._get_next_control().numpy()
+    return plan
 
 
 def get_simulated_feedback(

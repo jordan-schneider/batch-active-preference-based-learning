@@ -7,7 +7,7 @@ import driver  # type: ignore
 import fire  # type: ignore
 import gym  # type: ignore
 import numpy as np
-from driver.gym_driver import GymDriver  # type: ignore
+from driver.legacy.gym_driver import GymDriver  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
 from torch.utils.tensorboard import SummaryWriter

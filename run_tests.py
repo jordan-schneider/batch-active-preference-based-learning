@@ -6,7 +6,8 @@ import pickle
 from itertools import product
 from math import log
 from pathlib import Path
-from typing import Dict, Generator, List, Literal, Optional, Sequence, Set, Tuple, Union, cast
+from typing import (Dict, Generator, List, Literal, Optional, Sequence, Set,
+                    Tuple, Union, cast)
 
 import argh  # type: ignore
 import driver
@@ -14,7 +15,7 @@ import gym  # type: ignore
 import numpy as np
 import torch  # type: ignore
 from argh import arg
-from driver.gym_driver import GymDriver
+from driver.legacy.gym_driver import GymDriver
 from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
 from scipy.stats import multivariate_normal  # type: ignore
@@ -25,16 +26,9 @@ from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
 from TD3.TD3 import TD3, load_td3  # type: ignore
 from testing_factory import TestFactory
-from utils import (
-    assert_nonempty,
-    assert_normals,
-    assert_reward,
-    assert_rewards,
-    get_mean_reward,
-    normalize,
-    orient_normals,
-    parse_replications,
-)
+from utils import (assert_nonempty, assert_normals, assert_reward,
+                   assert_rewards, get_mean_reward, normalize, orient_normals,
+                   parse_replications)
 
 
 def make_gaussian_rewards(

@@ -3,7 +3,7 @@ from typing import List, Optional
 
 import fire  # type: ignore
 import numpy as np
-from driver.models import Driver
+from driver.legacy.models import Driver
 from joblib import Parallel, delayed  # type: ignore
 from numpy.random import default_rng
 
