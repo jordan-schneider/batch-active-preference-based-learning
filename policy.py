@@ -12,7 +12,7 @@ from joblib import Parallel, delayed  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
 from torch.utils.tensorboard import SummaryWriter
 
-from active.simulation_utils import create_env, make_opt_traj  # type: ignore
+from active.simulation_utils import TrajOptimizer, create_env  # type: ignore
 from TD3.TD3 import TD3, load_td3  # type: ignore
 from TD3.utils import ReplayBuffer  # type: ignore
 from utils import make_reward_path, make_td3_paths, make_TD3_state, parse_replications
@@ -80,7 +80,9 @@ def train(
     logging.basicConfig(filename=outdir / "log", level=verbosity)
 
     reward_weights = np.load(reward_path)
-    env = gym.make("driver-v1", reward=reward_weights, horizon=horizon, random_start=random_start)
+    env = gym.make(
+        "LegacyDriver-v1", reward=reward_weights, horizon=horizon, random_start=random_start
+    )
     action_shape = env.action_space.sample().shape
     logging.info("Initialized env")
 
@@ -145,7 +147,11 @@ def train(
             td3.save(str(outdir / model_name))
 
             eval_return = eval(
-                reward_weights, td3=td3, writer=writer, log_iter=t // save_period, horizon=horizon,
+                reward_weights,
+                td3=td3,
+                writer=writer,
+                log_iter=t // save_period,
+                horizon=horizon,
             )
             if eval_return > best_return:
                 best_return = eval_return
@@ -238,7 +244,7 @@ def eval(
     horizon: int = 50,
 ):
     logging.info("Evaluating the policy")
-    env = gym.make("driver-v1", reward=reward_weights, horizon=horizon)
+    env = gym.make("LegacyDriver-v1", reward=reward_weights, horizon=horizon)
 
     raw_state = env.reset()
     state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
@@ -258,11 +264,12 @@ def eval(
 def compare(reward_path: Path, td3_dir: Path, horizon: int = 50):
     logging.basicConfig(level="INFO")
     reward_weights = np.load(reward_path)
-    env = gym.make("driver-v1", reward=reward_weights, horizon=horizon)
+    env = gym.make("LegacyDriver-v1", reward=reward_weights, horizon=horizon)
     td3 = load_td3(env, td3_dir)
     empirical_return = eval(reward_weights, td3, horizon=horizon)
 
-    opt_traj = make_opt_traj(reward_weights)
+    traj_optimizer = TrajOptimizer(10)
+    opt_traj = traj_optimizer.make_opt_traj(reward_weights)
     simulation_object = create_env("driver")
     simulation_object.set_ctrl(opt_traj)
     features = simulation_object.get_features()
@@ -299,7 +306,7 @@ def refine(
     writer = SummaryWriter(log_dir=td3_dir.parent, filename_suffix="refine")
 
     reward_weights = np.load(reward_path)
-    env = gym.make("driver-v1", reward=reward_weights, horizon=horizon)
+    env = gym.make("LegacyDriver-v1", reward=reward_weights, horizon=horizon)
     td3 = load_td3(env, td3_dir, writer=writer)
 
     buffer = ReplayBuffer(td3.state_dim, td3.action_dim, writer=writer)

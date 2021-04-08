@@ -6,11 +6,10 @@ import pickle
 from itertools import product
 from math import log
 from pathlib import Path
-from typing import (Dict, Generator, List, Literal, Optional, Sequence, Set,
-                    Tuple, Union, cast)
+from typing import Dict, Generator, List, Literal, Optional, Sequence, Set, Tuple, Union, cast
 
 import argh  # type: ignore
-import driver
+import driver.gym
 import gym  # type: ignore
 import numpy as np
 import torch  # type: ignore
@@ -21,14 +20,21 @@ from joblib import Parallel, delayed  # type: ignore
 from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
-from active.simulation_utils import create_env, make_opt_traj
+from active.simulation_utils import TrajOptimizer, create_env
 from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
 from TD3.TD3 import TD3, load_td3  # type: ignore
 from testing_factory import TestFactory
-from utils import (assert_nonempty, assert_normals, assert_reward,
-                   assert_rewards, get_mean_reward, normalize, orient_normals,
-                   parse_replications)
+from utils import (
+    assert_nonempty,
+    assert_normals,
+    assert_reward,
+    assert_rewards,
+    get_mean_reward,
+    normalize,
+    orient_normals,
+    parse_replications,
+)
 
 
 def make_gaussian_rewards(
@@ -57,6 +63,7 @@ def make_gaussian_rewards(
 def find_reward_boundary(
     true_reward: np.ndarray,
     td3: TD3,
+    traj_optimizer: TrajOptimizer,
     n_rewards: int,
     use_equiv: bool,
     epsilon: float,
@@ -67,11 +74,11 @@ def find_reward_boundary(
     # process instead of computing each different value of epsilon independently.
 
     # TODO(joschnei): Un-hardcode horizon.
-    env = gym.make("driver-v1", reward=true_reward, horizon=50)
+    env = gym.make("CarWorld-v1", reward=true_reward, horizon=50)
 
     cov = 1.0
     rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
-    alignment = rewards_aligned(td3, env, rewards, epsilon, n_samples)
+    alignment = rewards_aligned(td3, traj_optimizer, env, rewards, epsilon, n_samples)
     mean_agree = np.mean(alignment)
 
     while mean_agree > 0.55 or mean_agree < 0.45:
@@ -96,7 +103,12 @@ def find_reward_boundary(
 
 
 def rewards_aligned(
-    td3: TD3, env: Env, test_rewards: np.ndarray, epsilon: float, n_test_states: int = int(1e4),
+    td3: TD3,
+    traj_optimizer: TrajOptimizer,
+    env: Env,
+    test_rewards: np.ndarray,
+    epsilon: float,
+    n_test_states: int = int(1e4),
 ) -> np.ndarray:
     with torch.no_grad():
         # TODO(joschnei): Profile this extensively. I think finding an optimal traj is taking too long.
@@ -109,9 +121,9 @@ def rewards_aligned(
         reward_features = GymDriver.get_feature_batch(raw_states)
         states = make_TD3_state(raw_states, reward_features)
         opt_actions = td3.select_action(states)
-        opt_values: np.ndarray = td3.critic.Q1(states, opt_actions).reshape(
-            n_test_states
-        ).cpu().numpy()
+        opt_values: np.ndarray = (
+            td3.critic.Q1(states, opt_actions).reshape(n_test_states).cpu().numpy()
+        )
 
         reward_feature_shape = reward_features[0].shape
 
@@ -125,9 +137,17 @@ def rewards_aligned(
         ), f"Actions shape={opt_actions.shape}, expected={(n_test_states, *action_shape)}"
 
         actions = np.empty((n_rewards, n_test_states, *action_shape))
-        for i, reward in enumerate(test_rewards):
-            for j, state in enumerate(raw_states):
-                actions[i, j] = make_opt_traj(reward, state).reshape(-1, *action_shape)[0]
+        i = 0
+        j = 0
+        for plan in Parallel(n_jobs=-2)(
+            delayed(traj_optimizer.make_opt_traj)(reward, state)
+            for reward, state in product(test_rewards, raw_states)
+        ):
+            actions[i, j] = plan.reshape(-1, *action_shape)[0]
+            j += 1
+            if j == len(raw_states):
+                j = 0
+                i += 1
 
         values: np.ndarray = (
             td3.critic.Q1(np.tile(states, (n_rewards, 1, 1)), actions)
@@ -162,7 +182,9 @@ def eval_test(
         return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
     else:
         return confusion_matrix(
-            y_true=aligned, y_pred=np.ones(aligned.shape, dtype=bool), labels=[False, True],
+            y_true=aligned,
+            y_pred=np.ones(aligned.shape, dtype=bool),
+            labels=[False, True],
         )
 
 
@@ -610,14 +632,21 @@ def make_test_rewards(
     use_equiv: bool = False,
     overwrite: bool = False,
 ):
-    env = gym.make("driver-v1", reward=np.zeros(4,), horizon=50)
+    env = gym.make(
+        "LegacyDriver-v1",
+        reward=np.zeros(
+            4,
+        ),
+    )
     model = load_td3(env, model_dir)
+    traj_optimizer = TrajOptimizer(n_planner_iters=10)
     test_rewards = load(outdir / "test_rewards.pkl", overwrite=overwrite)
     new_epsilons = set(epsilons) - test_rewards.keys()
     test_rewards: Dict[float, Tuple[np.ndarray, np.ndarray]] = {
         epsilon: find_reward_boundary(
             true_reward=true_reward,
             td3=model,
+            traj_optimizer=traj_optimizer,
             n_rewards=n_rewards,
             use_equiv=use_equiv,
             epsilon=epsilon,
@@ -645,7 +674,11 @@ def make_random_test(
             "Must supply n_random_test_questions if use_random_test_questions is true."
         )
     mean_reward = get_mean_reward(
-        elicited_input_features, elicited_preferences, reward_iterations, query_type, equiv_size,
+        elicited_input_features,
+        elicited_preferences,
+        reward_iterations,
+        query_type,
+        equiv_size,
     )
     inputs = make_random_questions(n_random_test_questions, sim)
     input_features, normals = make_normals(inputs, sim, use_equiv)

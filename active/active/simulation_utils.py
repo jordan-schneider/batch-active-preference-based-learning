@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
+import tensorflow as tf
 from driver.car import LegacyPlanCar, LegacyPlannerCar
 from driver.legacy.models import Driver  # type: ignore
 from driver.legacy.simulator import Simulation  # type: ignore
@@ -11,27 +12,31 @@ from driver.world import ThreeLaneCarWorld
 from active import algos
 
 
-def make_opt_traj(
-    reward: np.ndarray, start_state: Optional[np.ndarray] = None, n_planner_iter: int = 10
-) -> np.ndarray:
-    world = ThreeLaneCarWorld()
-    if start_state is None:
-        main_init = np.array([0.0, -0.3, np.pi / 2.0, 0.4])
-        other_init = None
-    else:
-        assert start_state.shape == (2, 4)
-        main_init, other_init = start_state[0], start_state[1]
-    planner_car = LegacyPlannerCar(
-        env=world,
-        init_state=main_init,
-        horizon=50,
-        weights=reward,
-        planner_args={"n_iter": n_planner_iter},
-    )
-    other_car = LegacyPlanCar(env=world, init_state=other_init)
-    world.add_cars([planner_car, other_car])
-    plan = planner_car._get_next_control().numpy()
-    return plan
+class TrajOptimizer:
+    def __init__(self, n_planner_iters: int):
+        self.world = ThreeLaneCarWorld()
+        self.planner_car = LegacyPlannerCar(
+            env=self.world,
+            init_state=np.array([0.0, -0.3, np.pi / 2.0, 0.4], dtype=np.float32),
+            horizon=50,
+            weights=np.ones(4,),
+            planner_args={"n_iter": n_planner_iters},
+        )
+        self.other_car = LegacyPlanCar(env=self.world)
+        self.world.add_cars([self.planner_car, self.other_car])
+
+    def make_opt_traj(
+        self, reward: np.ndarray, start_state: Optional[np.ndarray] = None, n_planner_iter: int = 10
+    ) -> np.ndarray:
+        if start_state is not None:
+            assert start_state.shape == (2, 4)
+            self.planner_car.init_state = start_state[0]
+            self.other_car.set_init_state(start_state[1])
+
+        self.planner_car.weights = reward
+
+        plan = self.planner_car._get_next_control().numpy()
+        return plan
 
 
 def get_simulated_feedback(
