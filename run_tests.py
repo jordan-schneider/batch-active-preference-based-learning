@@ -12,7 +12,7 @@ import argh  # type: ignore
 import driver.gym
 import gym  # type: ignore
 import numpy as np
-import tensorflow as tf
+import tensorflow as tf  # type: ignore
 
 tf.config.set_visible_devices([], "GPU")  # Car simulation stuff is faster on cpu
 import torch  # type: ignore
@@ -63,6 +63,32 @@ def make_gaussian_rewards(
     return rewards
 
 
+class GeometricSearch:
+    def __init__(self, start: float, base: float = 10.0) -> None:
+        self.value = start
+        self.base = base
+        self.min = start
+        self.max = start
+
+    def __call__(self, low: bool) -> float:
+        if not low:
+            self.min = min(self.min, self.value)
+            if self.value < self.max:
+                # If we already found a max we don't want to go above, pick a value between
+                # the current covariance and the max
+                self.value = np.sqrt(self.value * self.max)
+            else:
+                # Otherwise, grow geometrically
+                self.value *= self.base
+        else:
+            self.max = max(self.max, self.value)
+            if self.value > self.min:
+                self.value = np.sqrt(self.value * self.min)
+            else:
+                self.value /= self.base
+        return self.value
+
+
 def find_reward_boundary(
     true_reward: np.ndarray,
     td3: Td3,
@@ -71,37 +97,62 @@ def find_reward_boundary(
     use_equiv: bool,
     epsilon: float,
     n_samples: int,
+    max_attempts: int,
+    outdir: Path,
+    overwrite: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    # TODO(joschnei): If my bottleneck is GPU, then it makes sense to compute the proposed rewards
-    # for all epsilon first, and then feed them to the model all at once, check, and redo the
-    # process instead of computing each different value of epsilon independently.
-
+    """ Tries to find a set of rewards which is ~50% aligned """
     env = gym.make("LegacyDriver-v1", reward=true_reward)
 
-    cov = 1.0
-    rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
-    alignment = rewards_aligned(td3, traj_optimizer, env, rewards, epsilon, n_samples)
-    mean_agree = np.mean(alignment)
+    if (outdir / "search.pkl").exists() and not overwrite:
+        search = pickle.load((outdir / "search.pkl").open("rb"))
+        cov_search: GeometricSearch = search[0]
+        best_mean_agree, test_rewards, alignment = search[1]
+        attempt = search[2]
+    else:
+        cov_search = GeometricSearch(start=1.0)
+        attempt = 0
 
-    while mean_agree > 0.55 or mean_agree < 0.45:
-        if mean_agree > 0.55:
-            cov *= 1.1
-        else:
-            cov /= 1.1
+        test_rewards = make_gaussian_rewards(
+            n_rewards, use_equiv, mean=true_reward, cov=cov_search.value
+        )
+        alignment = rewards_aligned(td3, traj_optimizer, env, test_rewards, epsilon, n_samples)
+        mean_agree = np.mean(alignment)
+
+        best_mean_agree = mean_agree
+        best_test = (best_mean_agree, test_rewards, alignment)
+
+    while attempt < max_attempts and (mean_agree > 0.55 or mean_agree < 0.45):
+        attempt += 1
+
+        cov = cov_search(low=mean_agree < 0.45)
         if not np.isfinite(cov) or cov <= 0.0 or cov >= 100.0:
             # TODO(joschnei): Break is a code smell
             logging.warning(f"cov={cov}, using last good batch of rewards.")
             break
-        rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
-        alignment = rewards_aligned(td3, traj_optimizer, env, rewards, epsilon, n_samples)
+
+        test_rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
+        alignment = rewards_aligned(td3, traj_optimizer, env, test_rewards, epsilon, n_samples)
         mean_agree = np.mean(alignment)
+
+        if np.abs(mean_agree - 0.5) < np.abs(best_mean_agree - 0.5):
+            best_mean_agree = mean_agree
+            (best_mean_agree, test_rewards, alignment)
+
+        search = (cov_search, best_test, attempt)
+        pickle.dump(search, (outdir / "search.pkl").open("wb"))
+
+    if attempt == max_attempts:
+        logging.warning(f"Ran out of attempts, using test with mean_agree={best_mean_agree}")
+
+    test_rewards, alignment = best_test[1], best_test[2]
 
     assert alignment.shape == (
         n_rewards,
     ), f"Alignment shape={alignment.shape}, expected={(n_rewards,)}"
-    assert rewards.shape == (n_rewards, *true_reward.shape)
+    assert test_rewards.shape == (n_rewards, *true_reward.shape)
 
-    return rewards, alignment
+    return test_rewards, alignment
 
 
 def rewards_aligned(
@@ -112,8 +163,8 @@ def rewards_aligned(
     epsilon: float,
     n_test_states: int = int(1e4),
 ) -> np.ndarray:
+    """ Determines the epsilon-alignment of a set of test_rewards relative to a critic. """
     with torch.no_grad():
-        # TODO(joschnei): Profile this extensively. I think finding an optimal traj is taking too long.
         state_shape = env.observation_space.sample().shape
         action_shape = env.action_space.sample().shape
         n_rewards = len(test_rewards)
@@ -440,14 +491,6 @@ def load_elicitation(
     return normals, preferences, input_features
 
 
-def setup_tf_logging():
-    tf_logger = tf.get_logger()
-    for handler in tf_logger.handlers:
-        tf_logger.removeHandler(handler)
-    tf_handler = logging.FileHandler("tf.log")
-    tf_logger.addHandler(tf_handler)
-
-
 @arg("--epsilons", nargs="+", type=float)
 @arg("--deltas", nargs="+", type=float)
 @arg("--human-samples", nargs="+", type=int)
@@ -480,7 +523,6 @@ def simulated(
 ) -> None:
     """ Run tests with full data to determine how much reward noise gets """
     logging.basicConfig(level=verbosity)
-    setup_tf_logging()
 
     if replications is not None:
         replication_indices = parse_replications(replications)
@@ -694,6 +736,7 @@ def make_test_rewards(
     n_test_states: int,
     model_dir: Path,
     outdir: Path,
+    max_attempts: int = 10,
     use_equiv: bool = False,
     overwrite: bool = False,
 ):
@@ -719,6 +762,9 @@ def make_test_rewards(
                 use_equiv=use_equiv,
                 epsilon=epsilon,
                 n_samples=n_test_states,
+                max_attempts=max_attempts,
+                outdir=outdir,
+                overwrite=overwrite,
             )
             for epsilon in new_epsilons
         }
@@ -738,6 +784,9 @@ def make_random_test(
     sim,
     use_equiv: bool,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Generates an alignment test of randomly generated questions answered according to the mean
+    posterior reward.
+    """
     if n_random_test_questions is None:
         raise ValueError(
             "Must supply n_random_test_questions if use_random_test_questions is true."
