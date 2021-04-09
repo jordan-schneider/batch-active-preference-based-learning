@@ -5,9 +5,10 @@ from pathlib import Path
 
 import fire  # type: ignore
 import numpy as np
+from driver.legacy.models import Driver
 
-from active.simulation_utils import create_env
-from utils import assert_normals, assert_reward, orient_normals
+from active.simulation_utils import assert_normals, orient_normals
+from utils import assert_reward
 
 
 def make_normals(input_features: np.ndarray) -> np.ndarray:
@@ -70,7 +71,7 @@ def main(datadir: Path) -> None:
 
     flags = pickle.load(open(datadir / "flags.pkl", "rb"))
     use_equiv = False
-    sim = create_env(flags["task"])
+    sim = Driver()
     n_reward_features = sim.num_of_features
 
     inputs = np.load(datadir / "inputs.npy")

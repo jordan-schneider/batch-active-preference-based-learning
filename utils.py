@@ -1,14 +1,69 @@
 import logging
 import pickle as pkl
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import arrow
 import fire  # type: ignore
 import numpy as np
 from numpy.linalg import norm
+from scipy.stats import multivariate_normal  # type: ignore
 
 from active.sampling import Sampler
+
+
+def make_gaussian_rewards(
+    n_rewards: int,
+    use_equiv: bool,
+    mean: Optional[np.ndarray] = None,
+    cov: Union[np.ndarray, float, None] = None,
+    shape: int = 4,
+) -> np.ndarray:
+    """ Makes n_rewards uniformly sampled reward vectors of unit length."""
+    assert n_rewards > 0
+    mean = mean if mean is not None else np.zeros(shape)
+    cov = cov if cov is not None else np.eye(shape)
+    logging.debug(cov)
+    dist = multivariate_normal(mean=mean, cov=cov)
+
+    rewards = normalize(dist.rvs(size=n_rewards))
+    if use_equiv:
+        rewards = np.concatenate((rewards, np.ones((rewards.shape[0], 1))), axis=1)
+
+    assert_rewards(rewards, use_equiv, shape)
+
+    return rewards
+
+
+class GeometricSearch:
+    """Searches for a parameter with unknown bounds in the following way:
+    1. Search geometrically (*= base) in each direction until you've overshot the goal
+    2. Once you have established bounds, take the next value to be the geometric mean of the bounds.
+    """
+
+    def __init__(self, start: float, base: float = 10.0) -> None:
+        self.value = start
+        self.base = base
+        self.min = start
+        self.max = start
+
+    def __call__(self, low: bool) -> float:
+        if not low:
+            self.min = min(self.min, self.value)
+            if self.value < self.max:
+                # If we already found a max we don't want to go above, pick a value between
+                # the current covariance and the max
+                self.value = np.sqrt(self.value * self.max)
+            else:
+                # Otherwise, grow geometrically
+                self.value *= self.base
+        else:
+            self.max = max(self.max, self.value)
+            if self.value > self.min:
+                self.value = np.sqrt(self.value * self.min)
+            else:
+                self.value /= self.base
+        return self.value
 
 
 def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.ndarray:
@@ -89,13 +144,12 @@ def append(a: Optional[np.ndarray], b: Union[np.ndarray, int], flat=False) -> np
             return np.append(a, b)
 
 
-def load(outdir: Path, filename: str, overwrite: bool) -> Optional[np.ndarray]:
+def load(file: Path, overwrite: bool) -> Any:
     if overwrite:
         return None
 
-    filepath = outdir / filename
-    if filepath.exists():
-        return np.load(filepath)
+    if file.exists():
+        return np.load(file)
 
     return None
 
@@ -116,7 +170,7 @@ def make_td3_paths(td3_path: Path, replication_indices: List[int]) -> List[Path]
         replication_dir = td3_path / str(i)
         # Each replication folder contains directories whose names are timestamps
         children = [child.name for child in replication_dir.iterdir() if child.is_dir()]
-        most_recent_child = children[np.argmax([arrow.get(child) for child in children])]
+        most_recent_child = children[np.argmax([arrow.get(child) for child in children])]  # type: ignore
         td3_dir = replication_dir / most_recent_child
         # Within each dir is a set of best_X_actor, best_X_critic, etc files
         # We need to provide best_X to the path
@@ -157,14 +211,6 @@ def assert_nonempty(*arrs) -> None:
         assert len(arr) > 0
 
 
-def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int = 4) -> None:
-    """ Asserts the given array is an array of normal vectors defining half space constraints."""
-    shape = normals.shape
-    assert len(shape) == 2, f"shape does not have 2 dimensions:{shape}"
-    # Constant offset constraint adds one dimension to normal vectors.
-    assert shape[1] == n_reward_features + int(use_equiv)
-
-
 def assert_reward(
     reward: np.ndarray, use_equiv: bool, n_reward_features: int = 4, eps: float = 0.000_001
 ) -> None:
@@ -196,21 +242,6 @@ def assert_rewards(
 def normalize(vectors: np.ndarray) -> np.ndarray:
     """ Takes in a 2d array of row vectors and ensures each row vector has an L_2 norm of 1."""
     return (vectors.T / norm(vectors, axis=1)).T
-
-
-def orient_normals(
-    normals: np.ndarray,
-    preferences: np.ndarray,
-    use_equiv: bool = False,
-    n_reward_features: int = 4,
-) -> np.ndarray:
-    assert_normals(normals, use_equiv, n_reward_features)
-    assert preferences.shape == (normals.shape[0],)
-
-    oriented_normals = (normals.T * preferences).T
-
-    assert_normals(oriented_normals, use_equiv, n_reward_features)
-    return oriented_normals
 
 
 def get_mean_reward(

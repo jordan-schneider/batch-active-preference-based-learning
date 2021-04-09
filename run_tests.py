@@ -4,10 +4,8 @@ are caught by the preferences."""
 import logging
 import pickle
 from itertools import product
-from math import log
 from pathlib import Path
-from typing import (Dict, Generator, List, Literal, Optional, Sequence, Set,
-                    Tuple, Union, cast)
+from typing import Dict, Generator, List, Literal, Optional, Sequence, Set, Tuple, Union, cast
 
 import argh  # type: ignore
 import driver.gym
@@ -19,68 +17,426 @@ tf.config.set_visible_devices([], "GPU")  # Car simulation stuff is faster on cp
 import torch  # type: ignore
 from argh import arg
 from driver.legacy.gym_driver import GymDriver
+from driver.legacy.models import Driver
 from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
-from scipy.stats import multivariate_normal  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
+from TD3 import Td3, load_td3  # type: ignore
 
-from active.simulation_utils import TrajOptimizer, create_env
+from active.simulation_utils import TrajOptimizer, assert_normals, make_normals, orient_normals
+from equiv_utils import add_equiv_constraints, remove_equiv
 from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
-from TD3 import Td3, load_td3  # type: ignore
 from testing_factory import TestFactory
-from utils import (assert_nonempty, assert_normals, assert_reward,
-                   assert_rewards, get_mean_reward, normalize, orient_normals,
-                   parse_replications)
+from utils import (
+    GeometricSearch,
+    assert_nonempty,
+    assert_reward,
+    assert_rewards,
+    get_mean_reward,
+    load,
+    make_gaussian_rewards,
+    parse_replications,
+)
+
+# Top level functions callable from fire
 
 
-def make_gaussian_rewards(
-    n_rewards: int,
-    use_equiv: bool,
-    mean: Optional[np.ndarray] = None,
-    cov: Union[np.ndarray, float, None] = None,
-    n_reward_features: int = 4,
-) -> np.ndarray:
-    """ Makes n_rewards uniformly sampled reward vectors of unit length."""
-    assert n_rewards > 0
-    mean = mean if mean is not None else np.zeros(n_reward_features)
-    cov = cov if cov is not None else np.eye(n_reward_features)
-    logging.debug(cov)
-    dist = multivariate_normal(mean=mean, cov=cov)
+def premake_test_rewards(
+    epsilons: List[float] = [0.0],
+    n_rewards: int = 100,
+    n_reward_samples: int = 1000,
+    n_test_states: int = 1000,
+    true_reward_name: Path = Path("true_reward.npy"),
+    flags_name: Path = Path("flags.pkl"),
+    datadir: Path = Path(),
+    outdir: Path = Path(),
+    model_dir: Path = Path(),
+    use_equiv: bool = False,
+    replications: Optional[Union[str, Tuple[int, ...]]] = None,
+    n_cpus: int = 1,
+    overwrite: bool = False,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
+):
+    logging.basicConfig(level=verbosity)
+    if replications is not None:
+        replication_indices = parse_replications(replications)
+        model_dirs = make_td3_paths(model_dir, replication_indices)
 
-    rewards = normalize(dist.rvs(size=n_rewards))
+        for replication, model_dir in zip(replication_indices, model_dirs):
+            if not (datadir / str(replication)).exists():
+                logging.warning(f"Replication {replication} does not exist, skipping")
+                continue
+
+            premake_test_rewards(
+                epsilons=epsilons,
+                n_rewards=n_rewards,
+                n_reward_samples=n_reward_samples,
+                true_reward_name=true_reward_name,
+                flags_name=flags_name,
+                datadir=datadir / str(replication),
+                outdir=outdir / str(replication),
+                model_dir=model_dir,
+                use_equiv=use_equiv,
+                overwrite=overwrite,
+            )
+        exit()
+
+    true_reward = np.load(datadir / true_reward_name)
+    assert_reward(true_reward, False, 4)
+
+    make_test_rewards(
+        epsilons=epsilons,
+        true_reward=true_reward,
+        n_rewards=n_rewards,
+        n_test_states=n_test_states,
+        model_dir=model_dir,
+        outdir=outdir,
+        use_equiv=use_equiv,
+        overwrite=overwrite,
+        n_cpus=n_cpus,
+    )
+
+
+@arg("--epsilons", nargs="+", type=float)
+@arg("--deltas", nargs="+", type=float)
+@arg("--human-samples", nargs="+", type=int)
+def simulated(
+    epsilons: List[float] = [0.0],
+    deltas: List[float] = [0.05],
+    n_rewards: int = 100,
+    human_samples: List[int] = [1],
+    n_reward_samples: int = 1000,
+    n_test_states: int = 1000,
+    input_features_name: Path = Path("input_features.npy"),
+    normals_name: Path = Path("normals.npy"),
+    preferences_name: Path = Path("preferences.npy"),
+    true_reward_name: Path = Path("true_reward.npy"),
+    flags_name: Path = Path("flags.pkl"),
+    datadir: Path = Path(),
+    outdir: Path = Path(),
+    model_dir: Path = Path(),
+    use_equiv: bool = False,
+    use_mean_reward: bool = False,
+    use_random_test_questions: bool = False,
+    n_random_test_questions: Optional[int] = None,
+    skip_remove_duplicates: bool = False,
+    skip_noise_filtering: bool = False,
+    skip_epsilon_filtering: bool = False,
+    skip_redundancy_filtering: bool = False,
+    replications: Optional[Union[str, Tuple[int, ...]]] = None,
+    overwrite: bool = False,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
+) -> None:
+    """ Run tests with full data to determine how much reward noise gets """
+    logging.basicConfig(level=verbosity)
+
+    if replications is not None:
+        replication_indices = parse_replications(replications)
+        model_dirs = make_td3_paths(model_dir, replication_indices)
+
+        for replication, model_dir in zip(replication_indices, model_dirs):
+            if not (datadir / str(replication)).exists():
+                logging.warning(f"Replication {replication} does not exist, skipping")
+                continue
+
+            simulated(
+                epsilons=epsilons,
+                deltas=deltas,
+                n_rewards=n_rewards,
+                human_samples=human_samples,
+                n_reward_samples=n_reward_samples,
+                input_features_name=input_features_name,
+                normals_name=normals_name,
+                preferences_name=preferences_name,
+                true_reward_name=true_reward_name,
+                flags_name=flags_name,
+                datadir=datadir / str(replication),
+                outdir=outdir / str(replication),
+                model_dir=model_dir,
+                use_equiv=use_equiv,
+                use_mean_reward=use_mean_reward,
+                use_random_test_questions=use_random_test_questions,
+                n_random_test_questions=n_random_test_questions,
+                skip_remove_duplicates=skip_remove_duplicates,
+                skip_noise_filtering=skip_noise_filtering,
+                skip_epsilon_filtering=skip_epsilon_filtering,
+                skip_redundancy_filtering=skip_redundancy_filtering,
+                overwrite=overwrite,
+            )
+        exit()
+
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    if n_random_test_questions is not None:
+        # Fire defaults to parsing something as a string if its optional
+        n_random_test_questions = int(n_random_test_questions)
+
+    flags = pickle.load(open(datadir / flags_name, "rb"))
+    query_type = flags["query_type"]
+    equiv_probability = flags["equiv_size"]
+
+    env = Driver()
+    n_reward_features = env.num_of_features
+
+    elicited_normals, elicited_preferences, elicited_input_features = load_elicitation(
+        datadir=datadir,
+        normals_name=normals_name,
+        preferences_name=preferences_name,
+        input_features_name=input_features_name,
+        n_reward_features=n_reward_features,
+        use_equiv=use_equiv,
+        query_type=query_type,
+        equiv_probability=equiv_probability,
+        remove_duplicates=not skip_remove_duplicates,
+        outdir=outdir,
+    )
+    true_reward = np.load(datadir / true_reward_name)
+    assert_reward(true_reward, False, n_reward_features)
+
     if use_equiv:
-        rewards = np.concatenate((rewards, np.ones((rewards.shape[0], 1))), axis=1)
+        true_reward = np.append(true_reward, [1])
+    else:
+        assert not np.any(elicited_preferences == 0)
 
-    assert_rewards(rewards, use_equiv, n_reward_features)
+    factory = TestFactory(
+        query_type=query_type,
+        reward_dimension=elicited_normals.shape[1],
+        equiv_probability=equiv_probability,
+        n_reward_samples=n_reward_samples,
+        use_mean_reward=use_mean_reward,
+        skip_noise_filtering=skip_noise_filtering,
+        skip_epsilon_filtering=skip_epsilon_filtering,
+        skip_redundancy_filtering=skip_redundancy_filtering,
+    )
 
-    return rewards
+    confusion_path, test_path = make_outnames(
+        outdir,
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+    )
+    confusions: Dict[Experiment, np.ndarray] = load(confusion_path, overwrite)
+    minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
+
+    experiments = make_experiments(
+        epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys())
+    )
+
+    if use_random_test_questions:
+        normals, preferences, input_features = make_random_test(
+            n_random_test_questions,
+            elicited_input_features,
+            elicited_preferences,
+            reward_iterations=flags["reward_iterations"],
+            query_type=query_type,
+            equiv_size=flags["equiv_size"],
+            sim=env,
+            use_equiv=use_equiv,
+        )
+        assert_normals(normals, use_equiv)
+    else:
+        preferences = elicited_preferences
+        input_features = elicited_input_features
+        normals = orient_normals(
+            elicited_normals, elicited_preferences, use_equiv, n_reward_features
+        )
+
+    test_rewards = make_test_rewards(
+        epsilons=epsilons,
+        true_reward=true_reward,
+        n_rewards=n_rewards,
+        n_test_states=n_test_states,
+        model_dir=model_dir,
+        outdir=outdir,
+        use_equiv=use_equiv,
+        overwrite=overwrite,
+    )
+
+    for indices, confusion, experiment in Parallel(n_jobs=-2)(
+        delayed(run_gt_experiment)(
+            normals=normals,
+            test_rewards=test_rewards[epsilon][0],
+            test_reward_alignment=test_rewards[epsilon][1],
+            epsilon=epsilon,
+            delta=delta,
+            use_equiv=use_equiv,
+            n_human_samples=n,
+            factory=factory,
+            input_features=input_features,
+            preferences=preferences,
+            outdir=outdir,
+            verbosity=verbosity,
+        )
+        for epsilon, delta, n in experiments
+    ):
+        minimal_tests[experiment] = indices
+        confusions[experiment] = confusion
+
+    pickle.dump(confusions, open(confusion_path, "wb"))
+    pickle.dump(minimal_tests, open(test_path, "wb"))
 
 
-class GeometricSearch:
-    def __init__(self, start: float, base: float = 10.0) -> None:
-        self.value = start
-        self.base = base
-        self.min = start
-        self.max = start
+@arg("--epsilons", nargs="+", type=float)
+@arg("--deltas", nargs="+", type=float)
+@arg("--human-samples", nargs="+", type=int)
+def human(
+    epsilons: List[float] = [0.0],
+    deltas: List[float] = [0.05],
+    n_rewards: int = 10000,
+    human_samples: List[int] = [1],
+    n_model_samples: int = 1000,
+    input_features_name: Path = Path("input_features.npy"),
+    normals_name: Path = Path("normals.npy"),
+    preferences_name: Path = Path("preferences.npy"),
+    flags_name: Path = Path("flags.pkl"),
+    datadir: Path = Path("questions"),
+    outdir: Path = Path("questions"),
+    rewards_path: Optional[Path] = None,
+    use_equiv: bool = False,
+    use_mean_reward: bool = False,
+    skip_remove_duplicates: bool = False,
+    skip_noise_filtering: bool = False,
+    skip_epsilon_filtering: bool = False,
+    skip_redundancy_filtering: bool = False,
+    overwrite: bool = False,
+):
+    outdir.mkdir(parents=True, exist_ok=True)
 
-    def __call__(self, low: bool) -> float:
-        if not low:
-            self.min = min(self.min, self.value)
-            if self.value < self.max:
-                # If we already found a max we don't want to go above, pick a value between
-                # the current covariance and the max
-                self.value = np.sqrt(self.value * self.max)
-            else:
-                # Otherwise, grow geometrically
-                self.value *= self.base
-        else:
-            self.max = max(self.max, self.value)
-            if self.value > self.min:
-                self.value = np.sqrt(self.value * self.min)
-            else:
-                self.value /= self.base
-        return self.value
+    flags = pickle.load(open(datadir / flags_name, "rb"))
+    query_type = flags["query_type"]
+    equiv_probability = flags["equiv_size"]
+
+    sim = Driver()
+    n_reward_features = sim.num_of_features
+
+    elicited_normals, elicited_preferences, elicited_input_features = load_elicitation(
+        datadir=datadir,
+        normals_name=normals_name,
+        preferences_name=preferences_name,
+        input_features_name=input_features_name,
+        n_reward_features=n_reward_features,
+        use_equiv=use_equiv,
+        query_type=query_type,
+        equiv_probability=equiv_probability,
+        remove_duplicates=not skip_remove_duplicates,
+        outdir=outdir,
+    )
+    assert elicited_preferences.shape[0] > 0
+
+    factory = TestFactory(
+        query_type=query_type,
+        reward_dimension=elicited_normals.shape[1],
+        equiv_probability=equiv_probability,
+        n_reward_samples=n_model_samples,
+        use_mean_reward=use_mean_reward,
+        skip_noise_filtering=skip_noise_filtering,
+        skip_epsilon_filtering=skip_epsilon_filtering,
+        skip_redundancy_filtering=skip_redundancy_filtering,
+    )
+
+    test_path = outdir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="indices",
+    )
+    test_results_path = outdir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="test_results",
+    )
+
+    minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
+    results: Dict[Experiment, np.ndarray] = load(test_results_path, overwrite)
+
+    test_rewards = (
+        np.load(open(rewards_path, "rb"))
+        if rewards_path is not None
+        else make_gaussian_rewards(n_rewards, use_equiv)
+    )
+    np.save(outdir / "test_rewards.npy", test_rewards)
+
+    experiments = make_experiments(
+        epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys())
+    )
+
+    for indices, result, experiment in Parallel(n_jobs=-2)(
+        delayed(run_human_experiment)(
+            test_rewards,
+            elicited_normals,
+            elicited_input_features,
+            elicited_preferences,
+            epsilon,
+            delta,
+            n,
+            factory,
+            use_equiv,
+        )
+        for epsilon, delta, n in experiments
+    ):
+        minimal_tests[experiment] = indices
+        results[experiment] = result
+
+    pickle.dump(minimal_tests, open(test_path, "wb"))
+    pickle.dump(results, open(test_results_path, "wb"))
+
+
+Experiment = Tuple[float, float, int]
+
+
+# Test reward generation
+
+
+def make_test_rewards(
+    epsilons: Sequence[float],
+    true_reward: np.ndarray,
+    n_rewards: int,
+    n_test_states: int,
+    model_dir: Path,
+    outdir: Path,
+    n_cpus: int = 1,
+    max_attempts: int = 10,
+    use_equiv: bool = False,
+    overwrite: bool = False,
+):
+    env = gym.make(
+        "LegacyDriver-v1",
+        reward=np.zeros(
+            4,
+        ),
+    )
+    model = load_td3(env, model_dir)
+    traj_optimizer = TrajOptimizer(n_planner_iters=10)
+    test_rewards: Dict[float, Tuple[np.ndarray, np.ndarray]] = load(
+        outdir / "test_rewards.pkl", overwrite=overwrite
+    )
+    new_epsilons = set(epsilons) - test_rewards.keys()
+    test_rewards.update(
+        {
+            epsilon: find_reward_boundary(
+                true_reward=true_reward,
+                td3=model,
+                traj_optimizer=traj_optimizer,
+                n_rewards=n_rewards,
+                use_equiv=use_equiv,
+                epsilon=epsilon,
+                n_samples=n_test_states,
+                max_attempts=max_attempts,
+                outdir=outdir,
+                overwrite=overwrite,
+                n_cpus=n_cpus,
+            )
+            for epsilon in new_epsilons
+        }
+    )
+    pickle.dump(test_rewards, open(outdir / "test_rewards.pkl", "wb"))
+    del model  # Manually free GPU memory allocation, just in case
+    return test_rewards
 
 
 def find_reward_boundary(
@@ -211,164 +567,7 @@ def rewards_aligned(
     return alignment
 
 
-def run_test(normals: np.ndarray, test_rewards: np.ndarray, use_equiv: bool) -> np.ndarray:
-    """ Returns the predicted alignment of the fake rewards by the normals. """
-    assert_normals(normals, use_equiv)
-    results = cast(np.ndarray, np.all(np.dot(test_rewards, normals.T) > 0, axis=1))
-    return results
-
-
-def eval_test(
-    normals: np.ndarray, rewards: np.ndarray, aligned: np.ndarray, use_equiv: bool
-) -> np.ndarray:
-    """ Makes a confusion matrix by evaluating a test on the fake rewards. """
-    assert rewards.shape[0] == aligned.shape[0]
-    assert_rewards(rewards, use_equiv)
-
-    if normals.shape[0] > 0:
-        results = run_test(normals, rewards, use_equiv)
-        logging.info(
-            f"predicted true={np.sum(results)}, predicted false={results.shape[0] - np.sum(results)}"
-        )
-        return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
-    else:
-        return confusion_matrix(
-            y_true=aligned,
-            y_pred=np.ones(aligned.shape, dtype=bool),
-            labels=[False, True],
-        )
-
-
-def make_outname(
-    skip_remove_duplicates: bool,
-    skip_noise_filtering: bool,
-    skip_epsilon_filtering: bool,
-    skip_redundancy_filtering: bool,
-    base: str = "out",
-) -> str:
-    outname = base
-    if skip_remove_duplicates:
-        outname += ".skip_duplicates"
-    if skip_noise_filtering:
-        outname += ".skip_noise"
-    if skip_epsilon_filtering:
-        outname += ".skip_epsilon"
-    if skip_redundancy_filtering:
-        outname += ".skip_lp"
-    outname += ".pkl"
-    return outname
-
-
-def make_outnames(
-    outdir: Path,
-    skip_remove_duplicates: bool,
-    skip_noise_filtering: bool,
-    skip_epsilon_filtering: bool,
-    skip_redundancy_filtering: bool,
-) -> Tuple[Path, Path]:
-    confusion_path = outdir / make_outname(
-        skip_remove_duplicates,
-        skip_noise_filtering,
-        skip_epsilon_filtering,
-        skip_redundancy_filtering,
-        base="confusion",
-    )
-    test_path = outdir / make_outname(
-        skip_remove_duplicates,
-        skip_noise_filtering,
-        skip_epsilon_filtering,
-        skip_redundancy_filtering,
-        base="indices",
-    )
-    return confusion_path, test_path
-
-
-def remove_equiv(preferences: np.ndarray, *arrays: np.ndarray) -> Tuple[np.ndarray, ...]:
-    """ Finds equivalence preferences and removes them + the associated elements of *arrays. """
-    indices = preferences != 0
-    preferences = preferences[indices]
-    out_arrays = list()
-    for array in arrays:
-        out_arrays.append(array[indices])
-    return (preferences, *out_arrays)
-
-
-def add_equiv_constraints(
-    preferences: np.ndarray, normals: np.ndarray, equiv_prob: float
-) -> np.ndarray:
-    """ Adds equivalence constraints to a set of halspace constraints. """
-    out_normals = list()
-    for preference, normal in zip(preferences, normals):
-        if preference == 0:
-            max_return_diff = equiv_prob - log(2 * equiv_prob - 2)
-            # w phi >= -max_return_diff
-            # w phi + max_reutrn_diff >=0
-            # w phi <= max_return diff
-            # 0 <= max_return_diff - w phi
-            out_normals.append(np.append(normal, [max_return_diff]))
-            out_normals.append(np.append(-normals, [max_return_diff]))
-        elif preference == 1 or preference == -1:
-            out_normals.append(np.append(normal * preference, [0]))
-
-    return np.ndarray(out_normals)
-
-
-def load(path: Path, overwrite: bool) -> dict:
-    if overwrite:
-        return dict()
-    if path.exists():
-        return pickle.load(open(path, "rb"))
-    return dict()
-
-
-Experiment = Tuple[float, float, int]
-
-
-def run_human_experiment(
-    test_rewards: np.ndarray,
-    normals: np.ndarray,
-    input_features: np.ndarray,
-    preferences: np.ndarray,
-    epsilon: float,
-    delta: float,
-    n_human_samples: int,
-    factory: TestFactory,
-    use_equiv: bool,
-    verbosity: Literal["INFO", "DEBUG"] = "INFO",
-) -> Tuple[np.ndarray, np.ndarray, Experiment]:
-    """Distills a set of normals and preferences into a test using the factory, and runs that test on test_rewards
-
-    Args:
-        test_rewards (np.ndarray): Rewards to run test on
-        normals (np.ndarray): normal vector of halfplane constraints defining test questions
-        input_features (np.ndarray): reward features of trajectories in each question
-        preferences (np.ndarray): Human provided preference over trajectories
-        epsilon (float): Size of minimum value gap required for de-noising
-        delta (float): How much of the reward posterior must be over the value gap
-        n_human_samples (int): Number of preferences to prune down to
-        factory (TestFactory): Factory to produce test questions
-        use_equiv (bool): Allow equivalent preference labels?
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray, Experiment]: indices of the selected test questions, test results for each reward, and experimental hyperparameters
-    """
-    logging.basicConfig(level=verbosity)
-    if n_human_samples == -1:
-        n_human_samples == normals.shape[0]
-    filtered_normals = normals[:n_human_samples]
-    filtered_normals, indices = factory.filter_halfplanes(
-        inputs_features=input_features,
-        normals=filtered_normals,
-        epsilon=epsilon,
-        preferences=preferences,
-        delta=delta,
-    )
-
-    experiment = (epsilon, delta, n_human_samples)
-
-    results = run_test(filtered_normals, test_rewards, use_equiv)
-
-    return indices, results, experiment
+# Simulated Experiment
 
 
 def run_gt_experiment(
@@ -421,6 +620,78 @@ def run_gt_experiment(
     return indices, confusion, experiment
 
 
+def eval_test(
+    normals: np.ndarray, rewards: np.ndarray, aligned: np.ndarray, use_equiv: bool
+) -> np.ndarray:
+    """ Makes a confusion matrix by evaluating a test on the fake rewards. """
+    assert rewards.shape[0] == aligned.shape[0]
+    assert_rewards(rewards, use_equiv)
+
+    if normals.shape[0] > 0:
+        results = run_test(normals, rewards, use_equiv)
+        logging.info(
+            f"predicted true={np.sum(results)}, predicted false={results.shape[0] - np.sum(results)}"
+        )
+        return confusion_matrix(y_true=aligned, y_pred=results, labels=[False, True])
+    else:
+        return confusion_matrix(
+            y_true=aligned,
+            y_pred=np.ones(aligned.shape, dtype=bool),
+            labels=[False, True],
+        )
+
+
+# Human Experiments
+def run_human_experiment(
+    test_rewards: np.ndarray,
+    normals: np.ndarray,
+    input_features: np.ndarray,
+    preferences: np.ndarray,
+    epsilon: float,
+    delta: float,
+    n_human_samples: int,
+    factory: TestFactory,
+    use_equiv: bool,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
+) -> Tuple[np.ndarray, np.ndarray, Experiment]:
+    """Distills a set of normals and preferences into a test using the factory, and runs that test on test_rewards
+
+    Args:
+        test_rewards (np.ndarray): Rewards to run test on
+        normals (np.ndarray): normal vector of halfplane constraints defining test questions
+        input_features (np.ndarray): reward features of trajectories in each question
+        preferences (np.ndarray): Human provided preference over trajectories
+        epsilon (float): Size of minimum value gap required for de-noising
+        delta (float): How much of the reward posterior must be over the value gap
+        n_human_samples (int): Number of preferences to prune down to
+        factory (TestFactory): Factory to produce test questions
+        use_equiv (bool): Allow equivalent preference labels?
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, Experiment]: indices of the selected test questions, test results for each reward, and experimental hyperparameters
+    """
+    logging.basicConfig(level=verbosity)
+    if n_human_samples == -1:
+        n_human_samples == normals.shape[0]
+    filtered_normals = normals[:n_human_samples]
+    filtered_normals, indices = factory.filter_halfplanes(
+        inputs_features=input_features,
+        normals=filtered_normals,
+        epsilon=epsilon,
+        preferences=preferences,
+        delta=delta,
+    )
+
+    experiment = (epsilon, delta, n_human_samples)
+
+    results = run_test(filtered_normals, test_rewards, use_equiv)
+
+    return indices, results, experiment
+
+
+# Common test utils
+
+
 def make_experiments(
     epsilons: Sequence[float],
     deltas: Sequence[float],
@@ -428,6 +699,7 @@ def make_experiments(
     overwrite: bool,
     experiments: Optional[Set[Experiment]] = None,
 ) -> Generator[Experiment, None, None]:
+    """ Yields new experiments (unless overwrite is speificed)"""
     if overwrite:
         # TODO(joschnei): This is stupid but I can't be bothered to cast an iterator to a generator.
         for experiment in product(epsilons, deltas, n_human_samples):
@@ -438,342 +710,22 @@ def make_experiments(
                 yield experiment
 
 
-def make_normals(inputs: np.ndarray, sim, use_equiv: bool):
-    assert len(inputs.shape) == 3
-    assert inputs.shape[1] == 2
-    normals = np.empty(shape=(inputs.shape[0], sim.num_of_features))
-    input_features = np.empty(shape=(inputs.shape[0], 2, sim.num_of_features))
-    for i, (input_a, input_b) in enumerate(inputs):
-        sim.feed(input_a)
-        phi_a = np.array(sim.get_features())
-
-        sim.feed(input_b)
-        phi_b = np.array(sim.get_features())
-
-        input_features[i] = np.stack((phi_a, phi_b))
-
-        normals[i] = phi_a - phi_b
-    assert_normals(normals, use_equiv)
-    return input_features, normals
-
-
 def dedup(
-    normals: np.ndarray, preferences: np.ndarray, input_features: np.ndarray, outdir: Path
+    normals: np.ndarray,
+    preferences: np.ndarray,
+    input_features: np.ndarray,
+    outdir: Optional[Path] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     dedup_normals, indices = TestFactory.remove_duplicates(normals)
-    assert np.all(normals[indices] == dedup_normals)
     normals = dedup_normals
     preferences = preferences[indices]
     input_features = input_features[indices]
     logging.info(f"{normals.shape[0]} questions left after deduplicaiton.")
-    np.save(outdir / "dedup_normals.npy", normals)
-    np.save(outdir / "dedup_preferences.npy", preferences)
-    np.save(outdir / "dedup_input_features.npy", input_features)
+    if outdir is not None:
+        np.save(outdir / "dedup_normals.npy", normals)
+        np.save(outdir / "dedup_preferences.npy", preferences)
+        np.save(outdir / "dedup_input_features.npy", input_features)
     return normals, preferences, input_features
-
-
-def load_elicitation(
-    datadir: Path,
-    normals_name: Union[str, Path],
-    preferences_name: Union[str, Path],
-    input_features_name: Union[str, Path],
-    n_reward_features: int,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    normals = np.load(datadir / normals_name)
-    preferences = np.load(datadir / preferences_name)
-    input_features = np.load(datadir / input_features_name)
-
-    assert_normals(normals, False, n_reward_features)
-    assert_nonempty(normals, preferences, input_features)
-
-    return normals, preferences, input_features
-
-
-@arg("--epsilons", nargs="+", type=float)
-@arg("--deltas", nargs="+", type=float)
-@arg("--human-samples", nargs="+", type=int)
-def simulated(
-    epsilons: List[float] = [0.0],
-    deltas: List[float] = [0.05],
-    n_rewards: int = 100,
-    human_samples: List[int] = [1],
-    n_reward_samples: int = 1000,
-    n_test_states: int = 1000,
-    input_features_name: Path = Path("input_features.npy"),
-    normals_name: Path = Path("normals.npy"),
-    preferences_name: Path = Path("preferences.npy"),
-    true_reward_name: Path = Path("true_reward.npy"),
-    flags_name: Path = Path("flags.pkl"),
-    datadir: Path = Path(),
-    outdir: Path = Path(),
-    model_dir: Path = Path(),
-    use_equiv: bool = False,
-    use_mean_reward: bool = False,
-    use_random_test_questions: bool = False,
-    n_random_test_questions: Optional[int] = None,
-    skip_remove_duplicates: bool = False,
-    skip_noise_filtering: bool = False,
-    skip_epsilon_filtering: bool = False,
-    skip_redundancy_filtering: bool = False,
-    replications: Optional[Union[str, Tuple[int, ...]]] = None,
-    overwrite: bool = False,
-    verbosity: Literal["INFO", "DEBUG"] = "INFO",
-) -> None:
-    """ Run tests with full data to determine how much reward noise gets """
-    logging.basicConfig(level=verbosity)
-
-    if replications is not None:
-        replication_indices = parse_replications(replications)
-        model_dirs = make_td3_paths(model_dir, replication_indices)
-
-        for replication, model_dir in zip(replication_indices, model_dirs):
-            if not (datadir / str(replication)).exists():
-                logging.warning(f"Replication {replication} does not exist, skipping")
-                continue
-
-            simulated(
-                epsilons=epsilons,
-                deltas=deltas,
-                n_rewards=n_rewards,
-                human_samples=human_samples,
-                n_reward_samples=n_reward_samples,
-                input_features_name=input_features_name,
-                normals_name=normals_name,
-                preferences_name=preferences_name,
-                true_reward_name=true_reward_name,
-                flags_name=flags_name,
-                datadir=datadir / str(replication),
-                outdir=outdir / str(replication),
-                model_dir=model_dir,
-                use_equiv=use_equiv,
-                use_mean_reward=use_mean_reward,
-                use_random_test_questions=use_random_test_questions,
-                n_random_test_questions=n_random_test_questions,
-                skip_remove_duplicates=skip_remove_duplicates,
-                skip_noise_filtering=skip_noise_filtering,
-                skip_epsilon_filtering=skip_epsilon_filtering,
-                skip_redundancy_filtering=skip_redundancy_filtering,
-                overwrite=overwrite,
-            )
-        exit()
-
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    if n_random_test_questions is not None:
-        # Fire defaults to parsing something as a string if its optional
-        n_random_test_questions = int(n_random_test_questions)
-
-    flags = pickle.load(open(datadir / flags_name, "rb"))
-    query_type = flags["query_type"]
-    equiv_probability = flags["equiv_size"]
-    env = create_env(flags["task"])
-    n_reward_features = env.num_of_features
-
-    elicited_normals, elicited_preferences, elicited_input_features = load_elicitation(
-        datadir, normals_name, preferences_name, input_features_name, n_reward_features
-    )
-    true_reward = np.load(datadir / true_reward_name)
-    assert_reward(true_reward, False, n_reward_features)
-
-    if not use_equiv:
-        assert not np.any(elicited_preferences == 0)
-
-    factory = TestFactory(
-        query_type=query_type,
-        reward_dimension=elicited_normals.shape[1],
-        equiv_probability=equiv_probability,
-        n_reward_samples=n_reward_samples,
-        use_mean_reward=use_mean_reward,
-        skip_noise_filtering=skip_noise_filtering,
-        skip_epsilon_filtering=skip_epsilon_filtering,
-        skip_redundancy_filtering=skip_redundancy_filtering,
-    )
-
-    if use_equiv:
-        elicited_normals = add_equiv_constraints(
-            elicited_preferences, elicited_normals, equiv_prob=equiv_probability
-        )
-        true_reward = np.append(true_reward, [1])
-    elif query_type == "weak":
-        elicited_preferences, elicited_input_features, elicited_normals = remove_equiv(
-            elicited_preferences, elicited_input_features, elicited_normals
-        )
-    assert_normals(elicited_normals, use_equiv)
-
-    if not skip_remove_duplicates:
-        elicited_normals, elicited_preferences, elicited_input_features = dedup(
-            elicited_normals, elicited_preferences, elicited_input_features, outdir
-        )
-
-    confusion_path, test_path = make_outnames(
-        outdir,
-        skip_remove_duplicates,
-        skip_noise_filtering,
-        skip_epsilon_filtering,
-        skip_redundancy_filtering,
-    )
-    confusions: Dict[Experiment, np.ndarray] = load(confusion_path, overwrite)
-    minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
-
-    experiments = make_experiments(
-        epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys())
-    )
-
-    if use_random_test_questions:
-        normals, preferences, input_features = make_random_test(
-            n_random_test_questions,
-            elicited_input_features,
-            elicited_preferences,
-            reward_iterations=flags["reward_iterations"],
-            query_type=query_type,
-            equiv_size=flags["equiv_size"],
-            sim=env,
-            use_equiv=use_equiv,
-        )
-        assert_normals(normals, use_equiv)
-    else:
-        preferences = elicited_preferences
-        input_features = elicited_input_features
-        normals = orient_normals(
-            elicited_normals, elicited_preferences, use_equiv, n_reward_features
-        )
-
-    test_rewards = make_test_rewards(
-        epsilons=epsilons,
-        true_reward=true_reward,
-        n_rewards=n_rewards,
-        n_test_states=n_test_states,
-        model_dir=model_dir,
-        outdir=outdir,
-        use_equiv=use_equiv,
-        overwrite=overwrite,
-    )
-
-    for indices, confusion, experiment in Parallel(n_jobs=-2)(
-        delayed(run_gt_experiment)(
-            normals=normals,
-            test_rewards=test_rewards[epsilon][0],
-            test_reward_alignment=test_rewards[epsilon][1],
-            epsilon=epsilon,
-            delta=delta,
-            use_equiv=use_equiv,
-            n_human_samples=n,
-            factory=factory,
-            input_features=input_features,
-            preferences=preferences,
-            outdir=outdir,
-            verbosity=verbosity,
-        )
-        for epsilon, delta, n in experiments
-    ):
-        minimal_tests[experiment] = indices
-        confusions[experiment] = confusion
-
-    pickle.dump(confusions, open(confusion_path, "wb"))
-    pickle.dump(minimal_tests, open(test_path, "wb"))
-
-
-def premake_test_rewards(
-    epsilons: List[float] = [0.0],
-    n_rewards: int = 100,
-    n_reward_samples: int = 1000,
-    n_test_states: int = 1000,
-    true_reward_name: Path = Path("true_reward.npy"),
-    flags_name: Path = Path("flags.pkl"),
-    datadir: Path = Path(),
-    outdir: Path = Path(),
-    model_dir: Path = Path(),
-    use_equiv: bool = False,
-    replications: Optional[Union[str, Tuple[int, ...]]] = None,
-    n_cpus: int = 1,
-    overwrite: bool = False,
-    verbosity: Literal["INFO", "DEBUG"] = "INFO",
-):
-    logging.basicConfig(level=verbosity)
-    if replications is not None:
-        replication_indices = parse_replications(replications)
-        model_dirs = make_td3_paths(model_dir, replication_indices)
-
-        for replication, model_dir in zip(replication_indices, model_dirs):
-            if not (datadir / str(replication)).exists():
-                logging.warning(f"Replication {replication} does not exist, skipping")
-                continue
-
-            premake_test_rewards(
-                epsilons=epsilons,
-                n_rewards=n_rewards,
-                n_reward_samples=n_reward_samples,
-                true_reward_name=true_reward_name,
-                flags_name=flags_name,
-                datadir=datadir / str(replication),
-                outdir=outdir / str(replication),
-                model_dir=model_dir,
-                use_equiv=use_equiv,
-                overwrite=overwrite,
-            )
-        exit()
-
-    true_reward = np.load(datadir / true_reward_name)
-    assert_reward(true_reward, False, 4)
-
-    make_test_rewards(
-        epsilons=epsilons,
-        true_reward=true_reward,
-        n_rewards=n_rewards,
-        n_test_states=n_test_states,
-        model_dir=model_dir,
-        outdir=outdir,
-        use_equiv=use_equiv,
-        overwrite=overwrite,
-        n_cpus=n_cpus,
-    )
-
-
-def make_test_rewards(
-    epsilons: Sequence[float],
-    true_reward: np.ndarray,
-    n_rewards: int,
-    n_test_states: int,
-    model_dir: Path,
-    outdir: Path,
-    n_cpus: int = 1,
-    max_attempts: int = 10,
-    use_equiv: bool = False,
-    overwrite: bool = False,
-):
-    env = gym.make(
-        "LegacyDriver-v1",
-        reward=np.zeros(
-            4,
-        ),
-    )
-    model = load_td3(env, model_dir)
-    traj_optimizer = TrajOptimizer(n_planner_iters=10)
-    test_rewards: Dict[float, Tuple[np.ndarray, np.ndarray]] = load(
-        outdir / "test_rewards.pkl", overwrite=overwrite
-    )
-    new_epsilons = set(epsilons) - test_rewards.keys()
-    test_rewards.update(
-        {
-            epsilon: find_reward_boundary(
-                true_reward=true_reward,
-                td3=model,
-                traj_optimizer=traj_optimizer,
-                n_rewards=n_rewards,
-                use_equiv=use_equiv,
-                epsilon=epsilon,
-                n_samples=n_test_states,
-                max_attempts=max_attempts,
-                outdir=outdir,
-                overwrite=overwrite,
-                n_cpus=n_cpus,
-            )
-            for epsilon in new_epsilons
-        }
-    )
-    pickle.dump(test_rewards, open(outdir / "test_rewards.pkl", "wb"))
-    del model  # Manually free GPU memory allocation, just in case
-    return test_rewards
 
 
 def make_random_test(
@@ -811,64 +763,50 @@ def make_random_test(
     return normals, preferences, input_features
 
 
-@arg("--epsilons", nargs="+", type=float)
-@arg("--deltas", nargs="+", type=float)
-@arg("--human-samples", nargs="+", type=int)
-def human(
-    epsilons: List[float] = [0.0],
-    deltas: List[float] = [0.05],
-    n_rewards: int = 10000,
-    human_samples: List[int] = [1],
-    n_model_samples: int = 1000,
-    input_features_name: Path = Path("input_features.npy"),
-    normals_name: Path = Path("normals.npy"),
-    preferences_name: Path = Path("preferences.npy"),
-    flags_name: Path = Path("flags.pkl"),
-    datadir: Path = Path("questions"),
-    outdir: Path = Path("questions"),
-    rewards_path: Optional[Path] = None,
-    use_equiv: bool = False,
-    use_mean_reward: bool = False,
-    skip_remove_duplicates: bool = False,
-    skip_noise_filtering: bool = False,
-    skip_epsilon_filtering: bool = False,
-    skip_redundancy_filtering: bool = False,
-    overwrite: bool = False,
-):
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    flags = pickle.load(open(datadir / flags_name, "rb"))
-    query_type = flags["query_type"]
-    equiv_probability = flags["equiv_size"]
-    sim = create_env(flags["task"])
-    n_reward_features = sim.num_of_features
-
-    normals, preferences, input_features = load_elicitation(
-        datadir, normals_name, preferences_name, input_features_name, n_reward_features
-    )
-    assert preferences.shape[0] > 0
-
-    factory = TestFactory(
-        query_type=query_type,
-        reward_dimension=normals.shape[1],
-        equiv_probability=equiv_probability,
-        n_reward_samples=n_model_samples,
-        use_mean_reward=use_mean_reward,
-        skip_noise_filtering=skip_noise_filtering,
-        skip_epsilon_filtering=skip_epsilon_filtering,
-        skip_redundancy_filtering=skip_redundancy_filtering,
-    )
-
-    if use_equiv:
-        normals = add_equiv_constraints(preferences, normals, equiv_prob=equiv_probability)
-    else:
-        if query_type == "weak":
-            preferences, input_features, normals = remove_equiv(
-                preferences, input_features, normals
-            )
-        normals = orient_normals(normals, preferences, use_equiv)
+def run_test(normals: np.ndarray, test_rewards: np.ndarray, use_equiv: bool) -> np.ndarray:
+    """ Returns the predicted alignment of the fake rewards by the normals. """
     assert_normals(normals, use_equiv)
+    results = cast(np.ndarray, np.all(np.dot(test_rewards, normals.T) > 0, axis=1))
+    return results
 
+
+# IO Utils
+
+
+def make_outname(
+    skip_remove_duplicates: bool,
+    skip_noise_filtering: bool,
+    skip_epsilon_filtering: bool,
+    skip_redundancy_filtering: bool,
+    base: str = "out",
+) -> str:
+    outname = base
+    if skip_remove_duplicates:
+        outname += ".skip_duplicates"
+    if skip_noise_filtering:
+        outname += ".skip_noise"
+    if skip_epsilon_filtering:
+        outname += ".skip_epsilon"
+    if skip_redundancy_filtering:
+        outname += ".skip_lp"
+    outname += ".pkl"
+    return outname
+
+
+def make_outnames(
+    outdir: Path,
+    skip_remove_duplicates: bool,
+    skip_noise_filtering: bool,
+    skip_epsilon_filtering: bool,
+    skip_redundancy_filtering: bool,
+) -> Tuple[Path, Path]:
+    confusion_path = outdir / make_outname(
+        skip_remove_duplicates,
+        skip_noise_filtering,
+        skip_epsilon_filtering,
+        skip_redundancy_filtering,
+        base="confusion",
+    )
     test_path = outdir / make_outname(
         skip_remove_duplicates,
         skip_noise_filtering,
@@ -876,46 +814,41 @@ def human(
         skip_redundancy_filtering,
         base="indices",
     )
-    test_results_path = outdir / make_outname(
-        skip_remove_duplicates,
-        skip_noise_filtering,
-        skip_epsilon_filtering,
-        skip_redundancy_filtering,
-        base="test_results",
-    )
+    return confusion_path, test_path
 
-    minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite)
-    results: Dict[Experiment, np.ndarray] = load(test_results_path, overwrite)
 
-    if rewards_path is None:
-        test_rewards = make_gaussian_rewards(n_rewards, use_equiv)
-    else:
-        test_rewards = np.load(open(rewards_path, "rb"))
-    np.save(outdir / "test_rewards.npy", test_rewards)
+def load_elicitation(
+    datadir: Path,
+    normals_name: Union[str, Path],
+    preferences_name: Union[str, Path],
+    input_features_name: Union[str, Path],
+    n_reward_features: int,
+    use_equiv: bool,
+    query_type: Optional[str] = None,
+    equiv_probability: Optional[float] = None,
+    remove_duplicates: bool = True,
+    outdir: Optional[Path] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    normals = np.load(datadir / normals_name)
+    preferences = np.load(datadir / preferences_name)
+    input_features = np.load(datadir / input_features_name)
 
-    experiments = make_experiments(
-        epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys())
-    )
-
-    for indices, result, experiment in Parallel(n_jobs=-2)(
-        delayed(run_human_experiment)(
-            test_rewards,
+    if use_equiv:
+        assert equiv_probability is not None
+        normals = add_equiv_constraints(preferences, normals, equiv_prob=equiv_probability)
+    elif query_type == "weak":
+        preferences, normals, input_features = remove_equiv(
+            preferences,
             normals,
             input_features,
-            preferences,
-            epsilon,
-            delta,
-            n,
-            factory,
-            use_equiv,
         )
-        for epsilon, delta, n in experiments
-    ):
-        minimal_tests[experiment] = indices
-        results[experiment] = result
+    if remove_duplicates:
+        normals, preferences, input_features = dedup(normals, preferences, input_features, outdir)
 
-    pickle.dump(minimal_tests, open(test_path, "wb"))
-    pickle.dump(results, open(test_results_path, "wb"))
+    assert_normals(normals, False, n_reward_features)
+    assert_nonempty(normals, preferences, input_features)
+
+    return normals, preferences, input_features
 
 
 if __name__ == "__main__":

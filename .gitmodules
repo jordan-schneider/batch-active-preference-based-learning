@@ -1,3 +1,0 @@
-[submodule "TD3"]
-	path = TD3
-	url = https://github.com/sfujim/TD3.git

@@ -3,13 +3,53 @@ from typing import Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
-import tensorflow as tf
 from driver.car import LegacyPlanCar, LegacyPlannerCar
 from driver.legacy.models import Driver  # type: ignore
-from driver.legacy.simulator import Simulation  # type: ignore
 from driver.world import ThreeLaneCarWorld
 
 from active import algos
+
+
+def orient_normals(
+    normals: np.ndarray,
+    preferences: np.ndarray,
+    use_equiv: bool = False,
+    n_reward_features: int = 4,
+) -> np.ndarray:
+    assert_normals(normals, use_equiv, n_reward_features)
+    assert preferences.shape == (normals.shape[0],)
+
+    oriented_normals = (normals.T * preferences).T
+
+    assert_normals(oriented_normals, use_equiv, n_reward_features)
+    return oriented_normals
+
+
+def make_normals(inputs: np.ndarray, sim: Driver, use_equiv: bool):
+    assert len(inputs.shape) == 3
+    assert inputs.shape[1] == 2
+    normals = np.empty(shape=(inputs.shape[0], sim.num_of_features))
+    input_features = np.empty(shape=(inputs.shape[0], 2, sim.num_of_features))
+    for i, (input_a, input_b) in enumerate(inputs):
+        sim.feed(input_a)
+        phi_a = np.array(sim.get_features())
+
+        sim.feed(input_b)
+        phi_b = np.array(sim.get_features())
+
+        input_features[i] = np.stack((phi_a, phi_b))
+
+        normals[i] = phi_a - phi_b
+    assert_normals(normals, use_equiv)
+    return input_features, normals
+
+
+def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int = 4) -> None:
+    """ Asserts the given array is an array of normal vectors defining half space constraints."""
+    shape = normals.shape
+    assert len(shape) == 2, f"shape does not have 2 dimensions:{shape}"
+    # Constant offset constraint adds one dimension to normal vectors.
+    assert shape[1] == n_reward_features + int(use_equiv)
 
 
 class TrajOptimizer:
@@ -42,7 +82,7 @@ class TrajOptimizer:
 
 
 def get_simulated_feedback(
-    simulation: Simulation,
+    simulation: Driver,
     input_A: np.ndarray,
     input_B: np.ndarray,
     query_type: str,
@@ -91,13 +131,6 @@ def get_feedback(simulation_object, input_A, input_B, query_type):
         elif selection == "2":
             s = -1
     return phi_A, phi_B, s
-
-
-def create_env(task: str) -> Simulation:
-    if task == "driver":
-        return Driver()
-    else:
-        raise ValueError("There is no task called " + task)
 
 
 def run_algo(criterion, simulation_object, w_samples, delta_samples, continuous: bool = False):

@@ -56,7 +56,10 @@ class TestFactory:
         self.skip_redundancy_filtering = skip_redundancy_filtering
 
     def sample_rewards(
-        self, a_phis: np.ndarray, b_phis: np.ndarray, preferences: np.ndarray,
+        self,
+        a_phis: np.ndarray,
+        b_phis: np.ndarray,
+        preferences: np.ndarray,
     ) -> np.ndarray:
         """ Samples n_samples rewards via MCMC. """
         w_sampler = Sampler(self.reward_dimension)
@@ -82,7 +85,12 @@ class TestFactory:
                     break
             out.append(normal)
             out_indices.append(indices[i])
-        return np.array(out).reshape(-1, normals.shape[1]), np.array(indices, dtype=int)
+
+        dedup_normals = np.array(out).reshape(-1, normals.shape[1])
+        indices = np.array(indices, dtype=int)
+        assert np.all(normals[indices] == dedup_normals)
+
+        return dedup_normals, indices
 
     @staticmethod
     def filter_noise(
@@ -162,7 +170,7 @@ class TestFactory:
             if not self.deterministic and self.n_reward_samples is not None:
                 # This reward generation logic is jank.
                 rewards = self.sample_rewards(a_phis=a_phis, b_phis=b_phis, preferences=preferences)
-
+            assert rewards is not None
             filtered_normals, indices = self.margin_filter(
                 normals, filtered_normals, indices, rewards, epsilon, delta
             )
