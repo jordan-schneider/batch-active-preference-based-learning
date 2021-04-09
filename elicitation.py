@@ -6,16 +6,17 @@ from typing import Optional, Union
 
 import fire  # type: ignore
 import numpy as np
+from driver.legacy.models import Driver
 from joblib.parallel import Parallel, delayed  # type: ignore
 
 from active.sampling import Sampler
-from active.simulation_utils import create_env, get_feedback, get_simulated_feedback, run_algo
+from active.simulation_utils import get_feedback, get_simulated_feedback, run_algo
 from utils import append, load, make_reward_path, save_reward, update_inputs
 
 
-def setup(task: str, criterion: str, query_type: str, outdir: Path, delta: Optional[float] = None):
+def setup(criterion: str, query_type: str, outdir: Path, delta: Optional[float] = None):
+    """ Normalizes flag strings, makes outdir, configures logging """
     assert delta is None or delta > 1.0, "Delta must be strcitly greater than 1"
-    task = task.lower()
     criterion = criterion.lower()
     query_type = query_type.lower()
     outpath = Path(outdir)
@@ -28,11 +29,10 @@ def setup(task: str, criterion: str, query_type: str, outdir: Path, delta: Optio
     assert criterion == "information" or criterion == "volume" or criterion == "random", (
         "There is no criterion called " + criterion
     )
-    return task, criterion, query_type, outpath
+    return criterion, query_type, outpath
 
 
 def simulated(
-    task: str,
     criterion: str,
     query_type: str,
     termination_threshold: float,
@@ -44,6 +44,7 @@ def simulated(
     overwrite: bool = False,
     n_replications: int = 1,
 ):
+    """ Generates a test by eliciting from a human simulated by a ground truth reward. """
     n_replications = int(n_replications)
 
     if n_replications > 1:
@@ -51,7 +52,6 @@ def simulated(
             reward_dir, reward_name = make_reward_path(true_reward_path)
             Parallel(n_jobs=-2)(
                 delayed(simulated)(
-                    task,
                     criterion,
                     query_type,
                     termination_threshold,
@@ -67,7 +67,6 @@ def simulated(
         else:
             Parallel(n_jobs=-2)(
                 delayed(simulated)(
-                    task,
                     criterion,
                     query_type,
                     termination_threshold,
@@ -82,11 +81,9 @@ def simulated(
             )
         exit()
 
-    task, criterion, query_type, outdir = setup(
-        task, criterion, query_type, outdir, delta=equiv_size
-    )
+    criterion, query_type, outdir = setup(criterion, query_type, outdir, delta=equiv_size)
 
-    simulation_object = create_env(task)
+    simulation_object = Driver()
     d = simulation_object.num_of_features
 
     if true_reward_path is not None:
@@ -98,7 +95,6 @@ def simulated(
 
     pickle.dump(
         {
-            "task": task,
             "criterion": criterion,
             "query_type": query_type,
             "epsilon": termination_threshold,
@@ -109,10 +105,10 @@ def simulated(
         open(outdir / "flags.pkl", "wb"),
     )
 
-    normals = load(outdir, filename="normals.npy", overwrite=overwrite)
-    preferences = load(outdir, filename="preferences.npy", overwrite=overwrite)
-    inputs = load(outdir, filename="inputs.npy", overwrite=overwrite)
-    input_features = load(outdir, filename="input_features.npy", overwrite=overwrite)
+    normals = load(outdir / "normals.npy", overwrite=overwrite)
+    preferences = load(outdir / "preferences.npy", overwrite=overwrite)
+    inputs = load(outdir / "inputs.npy", overwrite=overwrite)
+    input_features = load(outdir / "input_features.npy", overwrite=overwrite)
 
     # If there is already data, feed it to the w_sampler to get the right posterior.
     w_sampler = Sampler(d)
@@ -160,7 +156,6 @@ def simulated(
 
 
 def human(
-    task: str,
     criterion: str,
     query_type: str,
     epsilon: float,
@@ -170,16 +165,14 @@ def human(
     continuous: bool = False,
     overwrite: bool = False,
 ):
-    task, criterion, query_type, outdir = setup(
-        task, criterion, query_type, outdir, delta=equiv_size
-    )
+    """ Generates a test by eliciting preferences from a human. """
+    criterion, query_type, outdir = setup(criterion, query_type, outdir, delta=equiv_size)
 
-    simulation_object = create_env(task)
+    simulation_object = Driver()
     d = simulation_object.num_of_features
 
     pickle.dump(
         {
-            "task": task,
             "criterion": criterion,
             "query_type": query_type,
             "epsilon": epsilon,
@@ -190,10 +183,10 @@ def human(
         open(outdir / "flags.pkl", "wb"),
     )
 
-    normals = load(outdir, filename="normals.npy", overwrite=overwrite)
-    preferences = load(outdir, filename="preferences.npy", overwrite=overwrite)
-    inputs = load(outdir, filename="inputs.npy", overwrite=overwrite)
-    input_features = load(outdir, filename="input_features.npy", overwrite=overwrite)
+    normals = load(outdir / "normals.npy", overwrite=overwrite)
+    preferences = load(outdir / "preferences.npy", overwrite=overwrite)
+    inputs = load(outdir / "inputs.npy", overwrite=overwrite)
+    input_features = load(outdir / "input_features.npy", overwrite=overwrite)
 
     w_sampler = Sampler(d)
     if inputs is not None and input_features is not None and preferences is not None:

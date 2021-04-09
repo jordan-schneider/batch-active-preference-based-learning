@@ -16,6 +16,7 @@ def orient_normals(
     use_equiv: bool = False,
     n_reward_features: int = 4,
 ) -> np.ndarray:
+    """ Orients halfplane normal vectors relative to preferences. """
     assert_normals(normals, use_equiv, n_reward_features)
     assert preferences.shape == (normals.shape[0],)
 
@@ -26,6 +27,7 @@ def orient_normals(
 
 
 def make_normals(inputs: np.ndarray, sim: Driver, use_equiv: bool):
+    """ Converts pairs of car inputs to trajectory preference normal vectors. """
     assert len(inputs.shape) == 3
     assert inputs.shape[1] == 2
     normals = np.empty(shape=(inputs.shape[0], sim.num_of_features))
@@ -53,6 +55,8 @@ def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int 
 
 
 class TrajOptimizer:
+    """ Finds optimal trajectories in the Driver environment. """
+
     def __init__(self, n_planner_iters: int):
         self.world = ThreeLaneCarWorld()
         self.planner_car = LegacyPlannerCar(
@@ -68,8 +72,9 @@ class TrajOptimizer:
         self.world.add_cars([self.planner_car, self.other_car])
 
     def make_opt_traj(
-        self, reward: np.ndarray, start_state: Optional[np.ndarray] = None, n_planner_iter: int = 10
+        self, reward: np.ndarray, start_state: Optional[np.ndarray] = None
     ) -> np.ndarray:
+        """ Finds the optimal sequence of actions under a given reward and starting state. """
         if start_state is not None:
             assert start_state.shape == (2, 4)
             self.planner_car.init_state = start_state[0]
@@ -89,6 +94,7 @@ def get_simulated_feedback(
     true_reward: np.ndarray,
     delta: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
+    """ Gets preference between trajectories from an agent simulated by true_reward """
     simulation.feed(input_A)
     phi_A = np.array(simulation.get_features())
     simulation.feed(input_B)
@@ -106,6 +112,7 @@ def get_simulated_feedback(
 
 
 def get_feedback(simulation_object, input_A, input_B, query_type):
+    """ Gets a preference between trajectories from a human user """
     simulation_object.feed(input_A)
     phi_A = np.array(simulation_object.get_features())
     simulation_object.feed(input_B)
@@ -134,6 +141,7 @@ def get_feedback(simulation_object, input_A, input_B, query_type):
 
 
 def run_algo(criterion, simulation_object, w_samples, delta_samples, continuous: bool = False):
+    """ Gets next pair of trajectories to ask for a preference over. """
     if criterion == "information":
         return algos.information(simulation_object, w_samples, delta_samples, continuous)
     if criterion == "volume":
@@ -144,28 +152,19 @@ def run_algo(criterion, simulation_object, w_samples, delta_samples, continuous:
         raise ValueError("There is no criterion called " + criterion)
 
 
-def func(ctrl_array, *args):
-    simulation_object = args[0]
-    w = np.array(args[1])
-    simulation_object.set_ctrl(ctrl_array)
-    features = np.array(simulation_object.get_features())
-    assert features.shape == (4,)
-    assert w.shape == (4,)
-    return -np.mean(features.dot(w))
-
-
-def compute_best(simulation_object, w, iter_count=10) -> np.ndarray:
-    u = simulation_object.ctrl_size
-    lower_ctrl_bound = [x[0] for x in simulation_object.ctrl_bounds]
-    upper_ctrl_bound = [x[1] for x in simulation_object.ctrl_bounds]
+def compute_best(sim: Driver, w: np.ndarray, iter_count: int = 10) -> np.ndarray:
+    """ Finds best trajectory in sim given reward weight w. """
+    u = sim.ctrl_size
+    lower_ctrl_bound = [x[0] for x in sim.ctrl_bounds]
+    upper_ctrl_bound = [x[1] for x in sim.ctrl_bounds]
     opt_val = np.inf
     optimal_ctrl: Optional[np.ndarray] = None
     for _ in range(iter_count):
         temp_res = opt.fmin_l_bfgs_b(
-            func,
+            path_return,
             x0=np.random.uniform(low=lower_ctrl_bound, high=upper_ctrl_bound, size=(u)),
-            args=(simulation_object, w),
-            bounds=simulation_object.ctrl_bounds,
+            args=(sim, w),
+            bounds=sim.ctrl_bounds,
             approx_grad=True,
         )
         if temp_res[1] < opt_val:
@@ -177,12 +176,24 @@ def compute_best(simulation_object, w, iter_count=10) -> np.ndarray:
     return optimal_ctrl
 
 
-def play(simulation_object, optimal_ctrl):
-    simulation_object.set_ctrl(optimal_ctrl)
+def path_return(ctrl_array: np.ndarray, *args):
+    """ Computes the optimization objective of a search over actions. """
+    simulation_object = args[0]
+    w = np.array(args[1])
+    simulation_object.set_ctrl(ctrl_array)
+    features = np.array(simulation_object.get_features())
+    assert features.shape == (4,)
+    assert w.shape == (4,)
+    return -np.mean(features.dot(w))
+
+
+def play(sim: Driver, optimal_ctrl):
+    """ Renders trajectory for user. """
+    sim.set_ctrl(optimal_ctrl)
     keep_playing = "y"
     while keep_playing == "y":
         keep_playing = "u"
-        simulation_object.watch(1)
+        sim.watch(1)
         while keep_playing != "n" and keep_playing != "y":
             keep_playing = input("Again? [y/n]: ").lower()
     return optimal_ctrl
