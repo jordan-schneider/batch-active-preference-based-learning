@@ -5,11 +5,12 @@ from typing import Optional
 
 import fire  # type: ignore
 import numpy as np
+from driver.legacy.models import Driver
 from joblib.parallel import Parallel, delayed  # type: ignore
 from scipy.linalg import norm  # type: ignore
 
 from active.sampling import Sampler
-from active.simulation_utils import create_env, get_feedback, get_simulated_feedback
+from active.simulation_utils import get_feedback, get_simulated_feedback
 from utils import append, load, make_reward_path, save_reward, update_inputs
 
 
@@ -105,12 +106,12 @@ def main(
         open(outpath / "flags.pkl", "wb"),
     )
 
-    normals = load(outpath, filename="normals.npy", overwrite=overwrite)
-    preferences = load(outpath, filename="preferences.npy", overwrite=overwrite)
-    inputs = load(outpath, filename="inputs.npy", overwrite=overwrite)
-    input_features = load(outpath, filename="input_features.npy", overwrite=overwrite)
+    normals = load(outpath / "normals.npy", overwrite=overwrite)
+    preferences = load(outpath / "preferences.npy", overwrite=overwrite)
+    inputs = load(outpath / "inputs.npy", overwrite=overwrite)
+    input_features = load(outpath / "input_features.npy", overwrite=overwrite)
 
-    simulation_object = create_env(task)
+    simulation_object = Driver()
 
     if (
         inputs is not None

@@ -418,7 +418,11 @@ def make_test_rewards(
     test_rewards: Dict[float, Tuple[np.ndarray, np.ndarray]] = load(
         outdir / "test_rewards.pkl", overwrite=overwrite
     )
+    if test_rewards is None:
+        test_rewards = {}
+
     new_epsilons = set(epsilons) - test_rewards.keys()
+
     test_rewards.update(
         {
             epsilon: find_reward_boundary(

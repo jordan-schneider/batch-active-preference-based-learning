@@ -8,13 +8,14 @@ import fire  # type: ignore
 import gym  # type: ignore
 import numpy as np
 from driver.legacy.gym_driver import GymDriver  # type: ignore
+from driver.legacy.models import Driver
 from joblib import Parallel, delayed  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
-from torch.utils.tensorboard import SummaryWriter
-
-from active.simulation_utils import TrajOptimizer, create_env  # type: ignore
 from TD3 import Td3, load_td3  # type: ignore
 from TD3.utils import ReplayBuffer  # type: ignore
+from torch.utils.tensorboard import SummaryWriter
+
+from active.simulation_utils import TrajOptimizer  # type: ignore
 from utils import make_reward_path, make_td3_paths, make_TD3_state, parse_replications
 
 
@@ -270,7 +271,7 @@ def compare(reward_path: Path, td3_dir: Path, horizon: int = 50):
 
     traj_optimizer = TrajOptimizer(10)
     opt_traj = traj_optimizer.make_opt_traj(reward_weights)
-    simulation_object = create_env("driver")
+    simulation_object = Driver()
     simulation_object.set_ctrl(opt_traj)
     features = simulation_object.get_features()
     opt_return = reward_weights @ features
