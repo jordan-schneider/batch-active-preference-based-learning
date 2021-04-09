@@ -19,7 +19,9 @@ class TrajOptimizer:
             env=self.world,
             init_state=np.array([0.0, -0.3, np.pi / 2.0, 0.4], dtype=np.float32),
             horizon=50,
-            weights=np.ones(4,),
+            weights=np.ones(
+                4,
+            ),
             planner_args={"n_iter": n_planner_iters},
         )
         self.other_car = LegacyPlanCar(env=self.world)

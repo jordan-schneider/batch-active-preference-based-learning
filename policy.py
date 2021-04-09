@@ -13,7 +13,7 @@ from matplotlib import pyplot as plt  # type: ignore
 from torch.utils.tensorboard import SummaryWriter
 
 from active.simulation_utils import TrajOptimizer, create_env  # type: ignore
-from TD3.TD3 import TD3, load_td3  # type: ignore
+from TD3 import Td3, load_td3  # type: ignore
 from TD3.utils import ReplayBuffer  # type: ignore
 from utils import make_reward_path, make_td3_paths, make_TD3_state, parse_replications
 
@@ -162,7 +162,7 @@ def pick_action(
     t: int,
     n_random_timesteps: int,
     env: GymDriver,
-    td3: TD3,
+    td3: Td3,
     state: np.ndarray,
     exploration_noise: float,
 ) -> np.ndarray:
@@ -218,13 +218,13 @@ def make_td3(
     actor_kwargs: Dict[str, Any] = {},
     critic_kwargs: Dict[str, Any] = {},
     writer: Optional[SummaryWriter] = None,
-) -> TD3:
+) -> Td3:
     state_dim = np.prod(env.observation_space.shape) + env.reward_weights.shape[0]
     action_dim = np.prod(env.action_space.shape)
     # TODO(joschnei): Clamp expects a float, but we should use the entire vector here.
     max_action = max(np.max(env.action_space.high), -np.min(env.action_space.low))
 
-    td3 = TD3(
+    td3 = Td3(
         state_dim=state_dim,
         action_dim=action_dim,
         max_action=max_action,
@@ -238,7 +238,7 @@ def make_td3(
 
 def eval(
     reward_weights: np.ndarray,
-    td3: TD3,
+    td3: Td3,
     writer: Optional[SummaryWriter] = None,
     log_iter: Optional[int] = None,
     horizon: int = 50,

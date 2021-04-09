@@ -12,6 +12,9 @@ import argh  # type: ignore
 import driver.gym
 import gym  # type: ignore
 import numpy as np
+import tensorflow as tf
+
+tf.config.set_visible_devices([], "GPU")  # Car simulation stuff is faster on cpu
 import torch  # type: ignore
 from argh import arg
 from driver.legacy.gym_driver import GymDriver
@@ -23,7 +26,7 @@ from sklearn.metrics import confusion_matrix  # type: ignore
 from active.simulation_utils import TrajOptimizer, create_env
 from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
-from TD3.TD3 import TD3, load_td3  # type: ignore
+from TD3 import Td3, load_td3  # type: ignore
 from testing_factory import TestFactory
 from utils import (
     assert_nonempty,
@@ -62,7 +65,7 @@ def make_gaussian_rewards(
 
 def find_reward_boundary(
     true_reward: np.ndarray,
-    td3: TD3,
+    td3: Td3,
     traj_optimizer: TrajOptimizer,
     n_rewards: int,
     use_equiv: bool,
@@ -73,8 +76,7 @@ def find_reward_boundary(
     # for all epsilon first, and then feed them to the model all at once, check, and redo the
     # process instead of computing each different value of epsilon independently.
 
-    # TODO(joschnei): Un-hardcode horizon.
-    env = gym.make("CarWorld-v1", reward=true_reward, horizon=50)
+    env = gym.make("LegacyDriver-v1", reward=true_reward)
 
     cov = 1.0
     rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
@@ -91,7 +93,7 @@ def find_reward_boundary(
             logging.warning(f"cov={cov}, using last good batch of rewards.")
             break
         rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
-        alignment = rewards_aligned(td3, env, rewards, epsilon, n_samples)
+        alignment = rewards_aligned(td3, traj_optimizer, env, rewards, epsilon, n_samples)
         mean_agree = np.mean(alignment)
 
     assert alignment.shape == (
@@ -103,7 +105,7 @@ def find_reward_boundary(
 
 
 def rewards_aligned(
-    td3: TD3,
+    td3: Td3,
     traj_optimizer: TrajOptimizer,
     env: Env,
     test_rewards: np.ndarray,
@@ -156,7 +158,7 @@ def rewards_aligned(
             .numpy()
         )
 
-        alignment = np.all(opt_values - values < epsilon, axis=1)
+        alignment = cast(np.ndarray, np.all(opt_values - values < epsilon, axis=1))
     return alignment
 
 
@@ -423,9 +425,9 @@ def dedup(
 
 def load_elicitation(
     datadir: Path,
-    normals_name: str,
-    preferences_name: str,
-    input_features_name: str,
+    normals_name: Union[str, Path],
+    preferences_name: Union[str, Path],
+    input_features_name: Union[str, Path],
     n_reward_features: int,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     normals = np.load(datadir / normals_name)
@@ -436,6 +438,14 @@ def load_elicitation(
     assert_nonempty(normals, preferences, input_features)
 
     return normals, preferences, input_features
+
+
+def setup_tf_logging():
+    tf_logger = tf.get_logger()
+    for handler in tf_logger.handlers:
+        tf_logger.removeHandler(handler)
+    tf_handler = logging.FileHandler("tf.log")
+    tf_logger.addHandler(tf_handler)
 
 
 @arg("--epsilons", nargs="+", type=float)
@@ -470,6 +480,7 @@ def simulated(
 ) -> None:
     """ Run tests with full data to determine how much reward noise gets """
     logging.basicConfig(level=verbosity)
+    setup_tf_logging()
 
     if replications is not None:
         replication_indices = parse_replications(replications)
@@ -622,6 +633,60 @@ def simulated(
     pickle.dump(minimal_tests, open(test_path, "wb"))
 
 
+def premake_test_rewards(
+    epsilons: List[float] = [0.0],
+    n_rewards: int = 100,
+    n_reward_samples: int = 1000,
+    n_test_states: int = 1000,
+    true_reward_name: Path = Path("true_reward.npy"),
+    flags_name: Path = Path("flags.pkl"),
+    datadir: Path = Path(),
+    outdir: Path = Path(),
+    model_dir: Path = Path(),
+    use_equiv: bool = False,
+    replications: Optional[Union[str, Tuple[int, ...]]] = None,
+    overwrite: bool = False,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
+):
+    logging.basicConfig(level=verbosity)
+    if replications is not None:
+        replication_indices = parse_replications(replications)
+        model_dirs = make_td3_paths(model_dir, replication_indices)
+
+        for replication, model_dir in zip(replication_indices, model_dirs):
+            if not (datadir / str(replication)).exists():
+                logging.warning(f"Replication {replication} does not exist, skipping")
+                continue
+
+            premake_test_rewards(
+                epsilons=epsilons,
+                n_rewards=n_rewards,
+                n_reward_samples=n_reward_samples,
+                true_reward_name=true_reward_name,
+                flags_name=flags_name,
+                datadir=datadir / str(replication),
+                outdir=outdir / str(replication),
+                model_dir=model_dir,
+                use_equiv=use_equiv,
+                overwrite=overwrite,
+            )
+        exit()
+
+    true_reward = np.load(datadir / true_reward_name)
+    assert_reward(true_reward, False, 4)
+
+    make_test_rewards(
+        epsilons=epsilons,
+        true_reward=true_reward,
+        n_rewards=n_rewards,
+        n_test_states=n_test_states,
+        model_dir=model_dir,
+        outdir=outdir,
+        use_equiv=use_equiv,
+        overwrite=overwrite,
+    )
+
+
 def make_test_rewards(
     epsilons: Sequence[float],
     true_reward: np.ndarray,
@@ -640,20 +705,24 @@ def make_test_rewards(
     )
     model = load_td3(env, model_dir)
     traj_optimizer = TrajOptimizer(n_planner_iters=10)
-    test_rewards = load(outdir / "test_rewards.pkl", overwrite=overwrite)
+    test_rewards: Dict[float, Tuple[np.ndarray, np.ndarray]] = load(
+        outdir / "test_rewards.pkl", overwrite=overwrite
+    )
     new_epsilons = set(epsilons) - test_rewards.keys()
-    test_rewards: Dict[float, Tuple[np.ndarray, np.ndarray]] = {
-        epsilon: find_reward_boundary(
-            true_reward=true_reward,
-            td3=model,
-            traj_optimizer=traj_optimizer,
-            n_rewards=n_rewards,
-            use_equiv=use_equiv,
-            epsilon=epsilon,
-            n_samples=n_test_states,
-        )
-        for epsilon in new_epsilons
-    }
+    test_rewards.update(
+        {
+            epsilon: find_reward_boundary(
+                true_reward=true_reward,
+                td3=model,
+                traj_optimizer=traj_optimizer,
+                n_rewards=n_rewards,
+                use_equiv=use_equiv,
+                epsilon=epsilon,
+                n_samples=n_test_states,
+            )
+            for epsilon in new_epsilons
+        }
+    )
     pickle.dump(test_rewards, open(outdir / "test_rewards.pkl", "wb"))
     del model  # Manually free GPU memory allocation, just in case
     return test_rewards
@@ -799,4 +868,4 @@ def human(
 
 
 if __name__ == "__main__":
-    argh.dispatch_commands([simulated, human])
+    argh.dispatch_commands([simulated, human, premake_test_rewards])
