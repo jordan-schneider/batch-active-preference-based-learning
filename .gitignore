@@ -29,3 +29,5 @@ data/
 .tmuxinator.yml
 
 **/*.egg-info/**
+
+mprofile_*

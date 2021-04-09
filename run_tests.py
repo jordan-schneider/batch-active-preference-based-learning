@@ -6,7 +6,8 @@ import pickle
 from itertools import product
 from math import log
 from pathlib import Path
-from typing import Dict, Generator, List, Literal, Optional, Sequence, Set, Tuple, Union, cast
+from typing import (Dict, Generator, List, Literal, Optional, Sequence, Set,
+                    Tuple, Union, cast)
 
 import argh  # type: ignore
 import driver.gym
@@ -28,16 +29,9 @@ from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
 from TD3 import Td3, load_td3  # type: ignore
 from testing_factory import TestFactory
-from utils import (
-    assert_nonempty,
-    assert_normals,
-    assert_reward,
-    assert_rewards,
-    get_mean_reward,
-    normalize,
-    orient_normals,
-    parse_replications,
-)
+from utils import (assert_nonempty, assert_normals, assert_reward,
+                   assert_rewards, get_mean_reward, normalize, orient_normals,
+                   parse_replications)
 
 
 def make_gaussian_rewards(
@@ -99,6 +93,7 @@ def find_reward_boundary(
     n_samples: int,
     max_attempts: int,
     outdir: Path,
+    n_cpus: int = 1,
     overwrite: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Tries to find a set of rewards which is ~50% aligned """
@@ -116,7 +111,9 @@ def find_reward_boundary(
         test_rewards = make_gaussian_rewards(
             n_rewards, use_equiv, mean=true_reward, cov=cov_search.value
         )
-        alignment = rewards_aligned(td3, traj_optimizer, env, test_rewards, epsilon, n_samples)
+        alignment = rewards_aligned(
+            td3, traj_optimizer, env, test_rewards, epsilon, n_samples, n_cpus=n_cpus
+        )
         mean_agree = np.mean(alignment)
 
         best_mean_agree = mean_agree
@@ -162,6 +159,7 @@ def rewards_aligned(
     test_rewards: np.ndarray,
     epsilon: float,
     n_test_states: int = int(1e4),
+    n_cpus: int = 1,
 ) -> np.ndarray:
     """ Determines the epsilon-alignment of a set of test_rewards relative to a critic. """
     with torch.no_grad():
@@ -192,7 +190,7 @@ def rewards_aligned(
         actions = np.empty((n_rewards, n_test_states, *action_shape))
         i = 0
         j = 0
-        for plan in Parallel(n_jobs=-2)(
+        for plan in Parallel(n_jobs=n_cpus)(
             delayed(traj_optimizer.make_opt_traj)(reward, state)
             for reward, state in product(test_rewards, raw_states)
         ):
@@ -687,6 +685,7 @@ def premake_test_rewards(
     model_dir: Path = Path(),
     use_equiv: bool = False,
     replications: Optional[Union[str, Tuple[int, ...]]] = None,
+    n_cpus: int = 1,
     overwrite: bool = False,
     verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ):
@@ -726,6 +725,7 @@ def premake_test_rewards(
         outdir=outdir,
         use_equiv=use_equiv,
         overwrite=overwrite,
+        n_cpus=n_cpus,
     )
 
 
@@ -736,6 +736,7 @@ def make_test_rewards(
     n_test_states: int,
     model_dir: Path,
     outdir: Path,
+    n_cpus: int = 1,
     max_attempts: int = 10,
     use_equiv: bool = False,
     overwrite: bool = False,
@@ -765,6 +766,7 @@ def make_test_rewards(
                 max_attempts=max_attempts,
                 outdir=outdir,
                 overwrite=overwrite,
+                n_cpus=n_cpus,
             )
             for epsilon in new_epsilons
         }
