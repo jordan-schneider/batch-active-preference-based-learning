@@ -40,6 +40,9 @@ from utils import (
     parse_replications,
 )
 
+Experiment = Tuple[float, float, int]
+
+
 # Top level functions callable from fire
 
 
@@ -128,6 +131,7 @@ def simulated(
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
     replications: Optional[Union[str, Tuple[int, ...]]] = None,
+    n_cpus: int = 1,
     overwrite: bool = False,
     verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ) -> None:
@@ -168,6 +172,8 @@ def simulated(
                 overwrite=overwrite,
             )
         exit()
+
+    parallel = Parallel(n_jobs=n_cpus)
 
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -253,11 +259,12 @@ def simulated(
         n_test_states=n_test_states,
         model_dir=model_dir,
         outdir=outdir,
+        parallel=parallel,
         use_equiv=use_equiv,
         overwrite=overwrite,
     )
 
-    for indices, confusion, experiment in Parallel(n_jobs=-2)(
+    for indices, confusion, experiment in parallel(
         delayed(run_gt_experiment)(
             normals=normals,
             test_rewards=test_rewards[epsilon][0],
@@ -303,10 +310,13 @@ def human(
     skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
+    n_cpus: int = 1,
     overwrite: bool = False,
 ):
     """ Evaluates alignment test elicited from a human. """
     outdir.mkdir(parents=True, exist_ok=True)
+
+    parallel = Parallel(n_jobs=n_cpus)
 
     flags = pickle.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
@@ -369,7 +379,7 @@ def human(
         epsilons, deltas, human_samples, overwrite, experiments=set(minimal_tests.keys())
     )
 
-    for indices, result, experiment in Parallel(n_jobs=-2)(
+    for indices, result, experiment in parallel(
         delayed(run_human_experiment)(
             test_rewards,
             elicited_normals,
@@ -388,9 +398,6 @@ def human(
 
     pickle.dump(minimal_tests, open(test_path, "wb"))
     pickle.dump(results, open(test_results_path, "wb"))
-
-
-Experiment = Tuple[float, float, int]
 
 
 # Test reward generation
