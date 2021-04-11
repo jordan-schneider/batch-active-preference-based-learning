@@ -23,7 +23,7 @@ def make_gaussian_rewards(
     assert n_rewards > 0
     mean = mean if mean is not None else np.zeros(shape)
     cov = cov if cov is not None else np.eye(shape)
-    logging.debug(cov)
+    logging.debug(f"Gaussian covariance={cov}")
     dist = multivariate_normal(mean=mean, cov=cov)
 
     rewards = normalize(dist.rvs(size=n_rewards))

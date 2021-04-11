@@ -25,6 +25,7 @@ from TD3 import Td3, load_td3  # type: ignore
 
 from active.simulation_utils import TrajOptimizer, assert_normals, make_normals, orient_normals
 from equiv_utils import add_equiv_constraints, remove_equiv
+from parallel_garbage import get_opt_actions
 from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
 from testing_factory import TestFactory
@@ -59,7 +60,7 @@ def premake_test_rewards(
     verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ):
     """ Finds test rewards for each experiment. """
-    logging.basicConfig(level=verbosity)
+    logging.basicConfig(level=verbosity, format="%(levelname)s:%(asctime)s:%(message)s")
     if replications is not None:
         replication_indices = parse_replications(replications)
         model_dirs = make_td3_paths(model_dir, replication_indices)
@@ -86,17 +87,18 @@ def premake_test_rewards(
     true_reward = np.load(datadir / true_reward_name)
     assert_reward(true_reward, False, 4)
 
-    make_test_rewards(
-        epsilons=epsilons,
-        true_reward=true_reward,
-        n_rewards=n_rewards,
-        n_test_states=n_test_states,
-        model_dir=model_dir,
-        outdir=outdir,
-        use_equiv=use_equiv,
-        overwrite=overwrite,
-        n_cpus=n_cpus,
-    )
+    with Parallel(n_jobs=n_cpus) as parallel:
+        make_test_rewards(
+            epsilons=epsilons,
+            true_reward=true_reward,
+            n_rewards=n_rewards,
+            n_test_states=n_test_states,
+            model_dir=model_dir,
+            outdir=outdir,
+            parallel=parallel,
+            use_equiv=use_equiv,
+            overwrite=overwrite,
+        )
 
 
 @arg("--epsilons", nargs="+", type=float)
@@ -401,7 +403,7 @@ def make_test_rewards(
     n_test_states: int,
     model_dir: Path,
     outdir: Path,
-    n_cpus: int = 1,
+    parallel: Parallel,
     max_attempts: int = 10,
     use_equiv: bool = False,
     overwrite: bool = False,
@@ -436,7 +438,7 @@ def make_test_rewards(
                 max_attempts=max_attempts,
                 outdir=outdir,
                 overwrite=overwrite,
-                n_cpus=n_cpus,
+                parallel=parallel,
             )
             for epsilon in new_epsilons
         }
@@ -456,7 +458,7 @@ def find_reward_boundary(
     n_samples: int,
     max_attempts: int,
     outdir: Path,
-    n_cpus: int = 1,
+    parallel: Parallel,
     overwrite: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """ Finds a ballanced set of test rewards according to a critic and epsilon. """
@@ -469,15 +471,25 @@ def find_reward_boundary(
         attempt = search[2]
     else:
         cov_search = GeometricSearch(start=1.0)
-        attempt = 0
 
         test_rewards = make_gaussian_rewards(
             n_rewards, use_equiv, mean=true_reward, cov=cov_search.value
         )
         alignment = rewards_aligned(
-            td3, traj_optimizer, env, test_rewards, epsilon, n_samples, n_cpus=n_cpus
+            td3=td3,
+            traj_optimizer=traj_optimizer,
+            env=env,
+            test_rewards=test_rewards,
+            epsilon=epsilon,
+            n_test_states=n_samples,
+            parallel=parallel,
         )
+        logging.debug("First alignment done")
         mean_agree = np.mean(alignment)
+
+        attempt = 1
+
+        logging.info(f"attempt={attempt} of {max_attempts}, mean_agree={mean_agree}")
 
         best_mean_agree = mean_agree
         best_test = (best_mean_agree, test_rewards, alignment)
@@ -488,12 +500,22 @@ def find_reward_boundary(
         cov = cov_search(low=mean_agree < 0.45)
         if not np.isfinite(cov) or cov <= 0.0 or cov >= 100.0:
             # TODO(joschnei): Break is a code smell
-            logging.warning(f"cov={cov}, using last good batch of rewards.")
+            logging.warning(f"cov={cov}, using best try with mean_agree={best_mean_agree}.")
             break
 
         test_rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
-        alignment = rewards_aligned(td3, traj_optimizer, env, test_rewards, epsilon, n_samples)
+        alignment = rewards_aligned(
+            td3=td3,
+            traj_optimizer=traj_optimizer,
+            env=env,
+            test_rewards=test_rewards,
+            epsilon=epsilon,
+            n_test_states=n_samples,
+            parallel=parallel,
+        )
         mean_agree = np.mean(alignment)
+
+        logging.info(f"attempt={attempt} of {max_attempts}, mean_agree={mean_agree}")
 
         if np.abs(mean_agree - 0.5) < np.abs(best_mean_agree - 0.5):
             best_mean_agree = mean_agree
@@ -501,6 +523,8 @@ def find_reward_boundary(
 
         search = (cov_search, best_test, attempt)
         pickle.dump(search, (outdir / "search.pkl").open("wb"))
+
+        logging.debug("Dumped search")
 
     if attempt == max_attempts:
         logging.warning(f"Ran out of attempts, using test with mean_agree={best_mean_agree}")
@@ -521,11 +545,12 @@ def rewards_aligned(
     env: Env,
     test_rewards: np.ndarray,
     epsilon: float,
+    parallel: Parallel,
     n_test_states: int = int(1e4),
-    n_cpus: int = 1,
 ) -> np.ndarray:
     """ Determines the epsilon-alignment of a set of test rewards relative to a critic and epsilon. """
     with torch.no_grad():
+        logging.debug("Finding reward alignment")
         state_shape = env.observation_space.sample().shape
         action_shape = env.action_space.sample().shape
         n_rewards = len(test_rewards)
@@ -550,18 +575,9 @@ def rewards_aligned(
             *action_shape,
         ), f"Actions shape={opt_actions.shape}, expected={(n_test_states, *action_shape)}"
 
-        actions = np.empty((n_rewards, n_test_states, *action_shape))
-        i = 0
-        j = 0
-        for plan in Parallel(n_jobs=n_cpus)(
-            delayed(traj_optimizer.make_opt_traj)(reward, state)
-            for reward, state in product(test_rewards, raw_states)
-        ):
-            actions[i, j] = plan.reshape(-1, *action_shape)[0]
-            j += 1
-            if j == len(raw_states):
-                j = 0
-                i += 1
+        actions = get_opt_actions(test_rewards, raw_states, traj_optimizer, parallel, action_shape)
+
+        logging.debug("opt actions found, getting values")
 
         values: np.ndarray = (
             td3.critic.Q1(np.tile(states, (n_rewards, 1, 1)), actions)
@@ -570,7 +586,11 @@ def rewards_aligned(
             .numpy()
         )
 
+        logging.debug("Values done.")
+
         alignment = cast(np.ndarray, np.all(opt_values - values < epsilon, axis=1))
+
+        logging.debug("Alignment done")
     return alignment
 
 
