@@ -52,7 +52,6 @@ Experiment = Tuple[float, float, int]
 def premake_test_rewards(
     epsilons: List[float] = [0.0],
     n_rewards: int = 100,
-    n_reward_samples: int = 1000,
     n_test_states: int = 1000,
     true_reward_name: Path = Path("true_reward.npy"),
     flags_name: Path = Path("flags.pkl"),
@@ -79,13 +78,14 @@ def premake_test_rewards(
             premake_test_rewards(
                 epsilons=epsilons,
                 n_rewards=n_rewards,
-                n_reward_samples=n_reward_samples,
+                n_test_states=n_test_states,
                 true_reward_name=true_reward_name,
                 flags_name=flags_name,
                 datadir=datadir / str(replication),
                 outdir=outdir / str(replication),
                 model_dir=model_dir,
                 use_equiv=use_equiv,
+                n_cpus=n_cpus,
                 overwrite=overwrite,
             )
         exit()
@@ -533,6 +533,8 @@ def rewards_aligned(
             td3.critic.Q1(states, opt_actions).reshape(n_test_states).cpu().numpy()
         )
 
+        logging.debug("Opt actions and values found.")
+
         reward_feature_shape = reward_features[0].shape
 
         assert states.shape == (
@@ -570,26 +572,14 @@ def get_opt_actions(
     parallel: Parallel,
     action_shape: Tuple[int, ...] = (2,),
 ) -> np.ndarray:
-    def f(
-        rewards: np.ndarray,
-        states: np.ndarray,
-        optim: TrajOptimizer,
-        action_shape: Tuple[int, ...] = (2,),
-    ):
-        batch_size = rewards.shape[0]
-        assert states.shape[0] == batch_size
-        opt_actions = np.empty((batch_size, *action_shape))
-        for i, (reward, state) in enumerate(zip(rewards, states)):
-            path = optim.make_opt_traj(reward, state).reshape(-1, *action_shape)
-            opt_actions[i] = path[0]
-
-        return opt_actions
 
     input_batches = np.array_split(list(product(rewards, states)), parallel.n_jobs)
 
+    logging.debug("Branching")
+
     return np.concatenate(
         parallel(
-            delayed(f)(
+            delayed(align_worker)(
                 rewards=batch[:, 0],
                 states=batch[:, 1],
                 optim=optim,
@@ -598,6 +588,23 @@ def get_opt_actions(
             for batch in input_batches
         )
     ).reshape(len(rewards), len(states), *action_shape)
+
+
+def align_worker(
+    rewards: np.ndarray,
+    states: np.ndarray,
+    optim: TrajOptimizer,
+    action_shape: Tuple[int, ...] = (2,),
+):
+    batch_size = rewards.shape[0]
+    assert states.shape[0] == batch_size
+    opt_actions = np.empty((batch_size, *action_shape))
+    for i, (reward, state) in enumerate(zip(rewards, states)):
+
+        path = optim.make_opt_traj(reward, state).reshape(-1, *action_shape)
+        opt_actions[i] = path[0]
+
+    return opt_actions
 
 
 # Simulated Experiment
