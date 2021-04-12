@@ -35,35 +35,7 @@ def make_gaussian_rewards(
     return rewards
 
 
-class GeometricSearch:
-    """Searches for a parameter with unknown bounds in the following way:
-    1. Search geometrically (*= base) in each direction until you've overshot the goal
-    2. Once you have established bounds, take the next value to be the geometric mean of the bounds.
-    """
 
-    def __init__(self, start: float, base: float = 10.0) -> None:
-        self.value = start
-        self.base = base
-        self.min = start
-        self.max = start
-
-    def __call__(self, low: bool) -> float:
-        if not low:
-            self.min = min(self.min, self.value)
-            if self.value < self.max:
-                # If we already found a max we don't want to go above, pick a value between
-                # the current covariance and the max
-                self.value = np.sqrt(self.value * self.max)
-            else:
-                # Otherwise, grow geometrically
-                self.value *= self.base
-        else:
-            self.max = max(self.max, self.value)
-            if self.value > self.min:
-                self.value = np.sqrt(self.value * self.min)
-            else:
-                self.value /= self.base
-        return self.value
 
 
 def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.ndarray:
