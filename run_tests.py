@@ -14,6 +14,8 @@ import numpy as np
 import tensorflow as tf  # type: ignore
 
 tf.config.set_visible_devices([], "GPU")  # Car simulation stuff is faster on cpu
+from dataclasses import dataclass
+
 import torch  # type: ignore
 from argh import arg
 from driver.legacy.gym_driver import GymDriver
@@ -85,6 +87,8 @@ def premake_test_rewards(
                 overwrite=overwrite,
             )
         exit()
+
+    outdir.mkdir(parents=True, exist_ok=True)
 
     true_reward = np.load(datadir / true_reward_name)
     assert_reward(true_reward, False, 4)
@@ -454,6 +458,23 @@ def make_test_rewards(
     return test_rewards
 
 
+@dataclass
+class Test:
+    rewards: np.ndarray
+    alignment: np.ndarray
+    mean_agree: float
+
+
+# TODO(joschnei): This shouldn't be a dataclass, it should have functions. Maybe be a superclass of
+# GeometricSearch
+@dataclass
+class Search:
+    epsilon: float
+    cov_search: GeometricSearch
+    best_test: Test
+    attempt: int
+
+
 def find_reward_boundary(
     true_reward: np.ndarray,
     td3: Td3,
@@ -470,12 +491,13 @@ def find_reward_boundary(
     """ Finds a ballanced set of test rewards according to a critic and epsilon. """
     env = gym.make("LegacyDriver-v1", reward=true_reward)
 
+    search: Optional[Search] = None
+
     if (outdir / "search.pkl").exists() and not overwrite:
         search = pickle.load((outdir / "search.pkl").open("rb"))
-        cov_search: GeometricSearch = search[0]
-        best_mean_agree, test_rewards, alignment = search[1]
-        attempt = search[2]
-    else:
+
+    if search is None or search.epsilon != epsilon:
+
         cov_search = GeometricSearch(start=1.0)
 
         test_rewards = make_gaussian_rewards(
@@ -491,22 +513,22 @@ def find_reward_boundary(
             parallel=parallel,
         )
         logging.debug("First alignment done")
-        mean_agree = np.mean(alignment)
+        mean_agree: float = cast(float, np.mean(alignment))
 
-        attempt = 1
+        best_test = Test(rewards=test_rewards, alignment=alignment, mean_agree=mean_agree)
+        search = Search(epsilon=epsilon, cov_search=cov_search, best_test=best_test, attempt=1)
 
-        logging.info(f"attempt={attempt} of {max_attempts}, mean_agree={mean_agree}")
+        logging.info(f"attempt={search.attempt} of {max_attempts}, mean_agree={mean_agree}")
 
-        best_mean_agree = mean_agree
-        best_test = (best_mean_agree, test_rewards, alignment)
+    while search.attempt < max_attempts and (mean_agree > 0.55 or mean_agree < 0.45):
+        search.attempt += 1
 
-    while attempt < max_attempts and (mean_agree > 0.55 or mean_agree < 0.45):
-        attempt += 1
-
-        cov = cov_search(low=mean_agree < 0.45)
+        cov = search.cov_search(low=mean_agree < 0.45)
         if not np.isfinite(cov) or cov <= 0.0 or cov >= 100.0:
             # TODO(joschnei): Break is a code smell
-            logging.warning(f"cov={cov}, using best try with mean_agree={best_mean_agree}.")
+            logging.warning(
+                f"cov={cov}, using best try with mean_agree={search.best_test.mean_agree}."
+            )
             break
 
         test_rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
@@ -519,23 +541,24 @@ def find_reward_boundary(
             n_test_states=n_samples,
             parallel=parallel,
         )
-        mean_agree = np.mean(alignment)
+        mean_agree = cast(float, np.mean(alignment))
 
-        logging.info(f"attempt={attempt} of {max_attempts}, mean_agree={mean_agree}")
+        logging.info(f"attempt={search.attempt} of {max_attempts}, mean_agree={mean_agree}")
 
-        if np.abs(mean_agree - 0.5) < np.abs(best_mean_agree - 0.5):
-            best_mean_agree = mean_agree
-            (best_mean_agree, test_rewards, alignment)
+        if np.abs(mean_agree - 0.5) < np.abs(search.best_test.mean_agree - 0.5):
+            search.best_test = Test(
+                rewards=test_rewards, alignment=alignment, mean_agree=mean_agree
+            )
 
-        search = (cov_search, best_test, attempt)
         pickle.dump(search, (outdir / "search.pkl").open("wb"))
-
         logging.debug("Dumped search")
 
-    if attempt == max_attempts:
-        logging.warning(f"Ran out of attempts, using test with mean_agree={best_mean_agree}")
+    if search.attempt == max_attempts:
+        logging.warning(
+            f"Ran out of attempts, using test with mean_agree={search.best_test.mean_agree}"
+        )
 
-    test_rewards, alignment = best_test[1], best_test[2]
+    test_rewards, alignment = search.best_test.rewards, search.best_test.alignment
 
     assert alignment.shape == (
         n_rewards,
