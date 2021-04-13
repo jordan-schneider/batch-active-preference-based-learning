@@ -236,8 +236,8 @@ def simulated(
         skip_epsilon_filtering,
         skip_redundancy_filtering,
     )
-    confusions: Dict[Experiment, np.ndarray] = load(confusion_path, overwrite_results)
-    minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite_results)
+    confusions: Dict[Experiment, np.ndarray] = load(confusion_path, overwrite_results, default={})
+    minimal_tests: Dict[Experiment, np.ndarray] = load(test_path, overwrite_results, default={})
 
     experiments = make_experiments(
         epsilons, deltas, human_samples, overwrite_results, experiments=set(minimal_tests.keys())

@@ -35,9 +35,6 @@ def make_gaussian_rewards(
     return rewards
 
 
-
-
-
 def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.ndarray:
     if len(raw_state.shape) == 3:
         assert raw_state.shape[1:] == (2, 4)
@@ -116,14 +113,19 @@ def append(a: Optional[np.ndarray], b: Union[np.ndarray, int], flat=False) -> np
             return np.append(a, b)
 
 
-def load(file: Path, overwrite: bool) -> Any:
+def load(file: Path, overwrite: bool, default: Any = None) -> Any:
     if overwrite:
-        return None
+        return default
 
     if file.exists():
-        return np.load(file)
+        if ".pkl" in file.name:
+            return pkl.load(open(file, "rb"))
+        elif ".npy" in file.name:
+            return np.load(file)
+        else:
+            raise ValueError(f"Filetype of {file} unrecognized")
 
-    return None
+    return default
 
 
 def make_mode_reward(
