@@ -19,6 +19,7 @@ class TestFactory:
         deterministic: bool = False,
         n_reward_samples: Optional[int] = None,
         use_mean_reward: bool = False,
+        skip_dedup: bool = False,
         skip_noise_filtering: bool = False,
         skip_epsilon_filtering: bool = False,
         skip_redundancy_filtering: bool = False,
@@ -51,6 +52,7 @@ class TestFactory:
         self.equiv_probability = equiv_probability
         self.deterministic = deterministic
         self.use_mean_reward = use_mean_reward
+        self.skip_dedup = skip_dedup
         self.skip_noise_filtering = skip_noise_filtering
         self.skip_epsilon_filtering = skip_epsilon_filtering
         self.skip_redundancy_filtering = skip_redundancy_filtering
@@ -150,6 +152,9 @@ class TestFactory:
         b_phis = inputs_features[:, 1]
         filtered_normals = normals
         indices = np.array(range(filtered_normals.shape[0]))
+
+        if not self.skip_dedup:
+            filtered_normals, indices = self.remove_duplicates(normals)
 
         if not self.skip_noise_filtering and noise_threshold is not None:
             if rewards is None:

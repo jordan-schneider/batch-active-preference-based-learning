@@ -207,8 +207,6 @@ def simulated(
         use_equiv=use_equiv,
         query_type=query_type,
         equiv_probability=equiv_probability,
-        remove_duplicates=not skip_remove_duplicates,
-        outdir=outdir,
     )
     true_reward = np.load(datadir / true_reward_name)
     assert_reward(true_reward, False, n_reward_features)
@@ -224,6 +222,7 @@ def simulated(
         equiv_probability=equiv_probability,
         n_reward_samples=n_reward_samples,
         use_mean_reward=use_mean_reward,
+        skip_dedup=skip_remove_duplicates,
         skip_noise_filtering=skip_noise_filtering,
         skip_epsilon_filtering=skip_epsilon_filtering,
         skip_redundancy_filtering=skip_redundancy_filtering,
@@ -344,8 +343,6 @@ def human(
         use_equiv=use_equiv,
         query_type=query_type,
         equiv_probability=equiv_probability,
-        remove_duplicates=not skip_remove_duplicates,
-        outdir=outdir,
     )
     assert elicited_preferences.shape[0] > 0
 
@@ -355,6 +352,7 @@ def human(
         equiv_probability=equiv_probability,
         n_reward_samples=n_model_samples,
         use_mean_reward=use_mean_reward,
+        skip_dedup=skip_remove_duplicates,
         skip_noise_filtering=skip_noise_filtering,
         skip_epsilon_filtering=skip_epsilon_filtering,
         skip_redundancy_filtering=skip_redundancy_filtering,
@@ -858,8 +856,6 @@ def load_elicitation(
     use_equiv: bool,
     query_type: Optional[str] = None,
     equiv_probability: Optional[float] = None,
-    remove_duplicates: bool = True,
-    outdir: Optional[Path] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """ Loads and postprocesses elicitation.py output"""
     normals = np.load(datadir / normals_name)
@@ -875,31 +871,10 @@ def load_elicitation(
             normals,
             input_features,
         )
-    if remove_duplicates:
-        normals, preferences, input_features = dedup(normals, preferences, input_features, outdir)
 
     assert_normals(normals, False, n_reward_features)
     assert_nonempty(normals, preferences, input_features)
 
-    return normals, preferences, input_features
-
-
-def dedup(
-    normals: np.ndarray,
-    preferences: np.ndarray,
-    input_features: np.ndarray,
-    outdir: Optional[Path] = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """ Deduplicates a set of normal vectors and grabs associated preferences and features. """
-    dedup_normals, indices = TestFactory.remove_duplicates(normals)
-    normals = dedup_normals
-    preferences = preferences[indices]
-    input_features = input_features[indices]
-    logging.info(f"{normals.shape[0]} questions left after deduplicaiton.")
-    if outdir is not None:
-        np.save(outdir / "dedup_normals.npy", normals)
-        np.save(outdir / "dedup_preferences.npy", preferences)
-        np.save(outdir / "dedup_input_features.npy", input_features)
     return normals, preferences, input_features
 
 
