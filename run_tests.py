@@ -17,7 +17,6 @@ import tensorflow as tf  # type: ignore
 from search import GeometricSearch, TestRewardSearch
 
 tf.config.set_visible_devices([], "GPU")  # Car simulation stuff is faster on cpu
-from dataclasses import dataclass
 
 import torch  # type: ignore
 from argh import arg
@@ -49,6 +48,7 @@ Experiment = Tuple[float, float, int]
 # Top level functions callable from fire
 
 
+@arg("--epsilons", nargs="+", type=float)
 def premake_test_rewards(
     epsilons: List[float] = [0.0],
     n_rewards: int = 100,
