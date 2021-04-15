@@ -135,6 +135,7 @@ def simulated(
     skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
+    legacy_test_rewards: bool = False,
     replications: Optional[Union[str, Tuple[int, ...]]] = None,
     n_cpus: int = 1,
     overwrite_test_rewards: bool = False,
@@ -178,6 +179,7 @@ def simulated(
                 skip_noise_filtering=skip_noise_filtering,
                 skip_epsilon_filtering=skip_epsilon_filtering,
                 skip_redundancy_filtering=skip_redundancy_filtering,
+                legacy_test_rewards=legacy_test_rewards,
                 n_cpus=n_cpus,
                 overwrite_test_rewards=overwrite_test_rewards,
                 overwrite_results=overwrite_results,
@@ -265,17 +267,22 @@ def simulated(
             elicited_normals, elicited_preferences, use_equiv, n_reward_features
         )
 
-    test_rewards = make_test_rewards(
-        epsilons=epsilons,
-        true_reward=true_reward,
-        n_rewards=n_rewards,
-        n_test_states=n_test_states,
-        model_dir=model_dir,
-        outdir=outdir,
-        parallel=parallel,
-        use_equiv=use_equiv,
-        overwrite=overwrite_test_rewards,
-    )
+    if not legacy_test_rewards:
+        test_rewards = make_test_rewards(
+            epsilons=epsilons,
+            true_reward=true_reward,
+            n_rewards=n_rewards,
+            n_test_states=n_test_states,
+            model_dir=model_dir,
+            outdir=outdir,
+            parallel=parallel,
+            use_equiv=use_equiv,
+            overwrite=overwrite_test_rewards,
+        )
+    else:
+        test_rewards = legacy_make_test_rewards(
+            normals, n_rewards, true_reward, epsilons, use_equiv
+        )
 
     for indices, confusion, experiment in parallel(
         delayed(run_gt_experiment)(
@@ -426,7 +433,7 @@ def make_test_rewards(
     max_attempts: int = 10,
     use_equiv: bool = False,
     overwrite: bool = False,
-):
+) -> Dict[float, Tuple[np.ndarray, np.ndarray]]:
     """ Makes test rewards sets for every epsilon and saves them to a file. """
     env = gym.make(
         "LegacyDriver-v1",
@@ -578,6 +585,54 @@ def rewards_aligned(
 
         logging.debug("Alignment done")
     return alignment
+
+
+def legacy_make_test_rewards(
+    normals: np.ndarray,
+    n_rewards: int,
+    true_reward: np.ndarray,
+    epsilons: List[float],
+    use_equiv: bool,
+) -> Dict[float, Tuple[np.ndarray, np.ndarray]]:
+    """ Generates n_rewards reward vectors and determines which are aligned. """
+    assert_normals(normals, use_equiv)
+    assert n_rewards > 0
+    assert_reward(true_reward, use_equiv)
+
+    n_reward_features = normals.shape[1]
+
+    test_rewards: Dict[float, Tuple[np.ndarray, np.ndarray]] = {}
+
+    for epsilon in epsilons:
+        assert epsilon >= 0.0
+
+        cov = 1.0
+
+        rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
+        normals = normals[true_reward @ normals.T > epsilon]
+        ground_truth_alignment = cast(np.ndarray, np.all(rewards @ normals.T > 0, axis=1))
+        mean_agree = np.mean(ground_truth_alignment)
+
+        while mean_agree > 0.55 or mean_agree < 0.45:
+            if mean_agree > 0.55:
+                cov *= 1.1
+            else:
+                cov /= 1.1
+            if not np.isfinite(cov) or cov <= 0.0 or cov >= 100.0:
+                # TODO(joschnei): Break is a code smell
+                logging.warning(f"cov={cov}, using last good batch of rewards.")
+                break
+            rewards = make_gaussian_rewards(n_rewards, use_equiv, mean=true_reward, cov=cov)
+            normals = normals[true_reward @ normals.T > epsilon]
+            ground_truth_alignment = cast(np.ndarray, np.all(rewards @ normals.T > 0, axis=1))
+            mean_agree = np.mean(ground_truth_alignment)
+
+        assert ground_truth_alignment.shape == (n_rewards,)
+        assert rewards.shape == (n_rewards, n_reward_features)
+
+        test_rewards[epsilon] = (rewards, ground_truth_alignment)
+
+    return test_rewards
 
 
 def get_opt_actions(
