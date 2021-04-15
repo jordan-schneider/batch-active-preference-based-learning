@@ -2,7 +2,7 @@ import logging
 import pickle
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
+from typing import Dict, List, Optional, Tuple, Union, cast
 
 import fire  # type: ignore
 import numpy as np
@@ -68,7 +68,7 @@ def get_hue(hue: str, df: pd.DataFrame):
 
 def check(
     normals: np.ndarray,
-    indices: np.ndarray,
+    indices: Dict[Experiment, np.ndarray],
     rewards: np.ndarray,
     saved_agreements: Dict[Experiment, np.ndarray],
 ):
@@ -80,7 +80,7 @@ def check(
         test = normals[i]
         aligned = np.all(np.dot(rewards, test.T) > 0, axis=1)
 
-        aligned_rewards = rewards[aligned]
+        aligned_rewards: np.ndarray = rewards[aligned]
         misaligned_rewards = rewards[np.logical_not(aligned)]
 
         for agreement in np.mean(np.dot(aligned_rewards, validation_test) > 0, axis=1):
@@ -109,7 +109,8 @@ def make_agreements(file) -> pd.DataFrame:
     """
     agreements = pd.Series(pickle.load(file)).reset_index()
     agreements = agreements.join(
-        agreements.apply(lambda x: list(x[0]), result_type="expand", axis="columns"), rsuffix="_",
+        agreements.apply(lambda x: list(x[0]), result_type="expand", axis="columns"),
+        rsuffix="_",
     )
     del agreements["0"]
     agreements.columns = ["epsilon", "delta", "n", "aligned", "misaligned"]
@@ -137,10 +138,19 @@ def make_human_confusion(
             continue
         confusion = confusion_matrix(y_true=label, y_pred=prediction, labels=[False, True])
         confusions.append(
-            (*experiment, confusion[0][0], confusion[0][1], confusion[1][0], confusion[1][1],)
+            (
+                *experiment,
+                confusion[0][0],
+                confusion[0][1],
+                confusion[1][0],
+                confusion[1][1],
+            )
         )
 
-    df = pd.DataFrame(confusions, columns=["epsilon", "delta", "n", "tn", "fp", "fn", "tp"],)
+    df = pd.DataFrame(
+        confusions,
+        columns=["epsilon", "delta", "n", "tn", "fp", "fn", "tp"],
+    )
 
     df = df.convert_dtypes()
 
@@ -250,6 +260,11 @@ def setup_plt(font_size: int, use_dark_background: bool) -> None:
     if use_dark_background:
         plt.style.use("dark_background")
 
+    mpl_logger = logging.getLogger("matplotlib")
+    mpl_logger.setLevel(logging.WARNING)
+
+    logging.getLogger("PIL").setLevel("WARNING")
+
 
 def assert_style(style: str) -> Style:
     style = style.upper()
@@ -261,7 +276,11 @@ def assert_style(style: str) -> Style:
 
 
 def plot_agreements(
-    agreements: pd.DataFrame, epsilon: float, delta: float, n: int, out: Optional[Path] = None,
+    agreements: pd.DataFrame,
+    epsilon: float,
+    delta: float,
+    n: int,
+    out: Optional[Path] = None,
 ) -> None:
     """Plots histograms of how many agents had different amounts of holdout agreement for agents
     prediced tobe aligned and misaligned."""
@@ -284,7 +303,9 @@ def plot_mean_agreement(agreements: pd.DataFrame, out: Optional[Path] = None) ->
     mean_agreement = agreements.groupby(["epsilon", "delta", "n", "aligned"]).mean().reset_index()
     plt.hist(mean_agreement[mean_agreement.aligned].value, label="aligned", alpha=0.3)
     plt.hist(
-        mean_agreement[np.logical_not(mean_agreement.aligned)].value, label="unaligned", alpha=0.3,
+        mean_agreement[np.logical_not(mean_agreement.aligned)].value,
+        label="unaligned",
+        alpha=0.3,
     )
 
     plt.xlabel("\% holdout agreement")
@@ -333,7 +354,8 @@ def plot_fpr(
         plt.xlabel(r"$\epsilon$")
         plt.ylabel("False Positive Rate")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
         transparent = False
@@ -341,7 +363,8 @@ def plot_fpr(
         plt.xlabel("Value Slack")
         plt.ylabel("False Positive Rate")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
         transparent = True
@@ -350,15 +373,16 @@ def plot_fpr(
         plt.ylabel("False Positive Rate")
         plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
         transparent = False
     else:
         raise ValueError(f"Style {style} not defined.")
 
-    plt.savefig(rootdir / ("fpr" + ablation + ".pdf"), transparent=transparent)
-    plt.savefig(rootdir / ("fpr" + ablation + ".png"), transparent=transparent)
+    plt.savefig(rootdir / ("fpr." + ablation + ".pdf"), transparent=transparent)
+    plt.savefig(rootdir / ("fpr." + ablation + ".png"), transparent=transparent)
     closefig()
 
     # TODO(joschnei): The way I was doing this before meant that the different axes had different
@@ -400,7 +424,8 @@ def plot_fnr(
         plt.xlabel(r"$\epsilon$")
         plt.ylabel("False Negative Rate")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
     elif style == "POSTER":
@@ -410,8 +435,8 @@ def plot_fnr(
     else:
         raise ValueError(f"Style {style} not defined.")
 
-    plt.savefig(rootdir / ("fnr" + ablation + ".pdf"))
-    plt.savefig(rootdir / ("fnr" + ablation + ".png"))
+    plt.savefig(rootdir / ("fnr." + ablation + ".pdf"))
+    plt.savefig(rootdir / ("fnr." + ablation + ".png"))
     closefig()
 
 
@@ -456,7 +481,8 @@ def plot_accuracy(
         plt.xlabel("Value Slack")
         plt.ylabel("Accuracy")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
         transparent = True
@@ -465,7 +491,8 @@ def plot_accuracy(
         plt.ylabel("Accuracy")
         plt.title(r"$\epsilon$-Relaxation's Effect on Accuracy")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
         transparent = False
@@ -473,15 +500,16 @@ def plot_accuracy(
         plt.xlabel(r"$\epsilon$")
         plt.ylabel("Accuracy")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
         transparent = False
     else:
         raise ValueError(f"Style {style} not defined.")
 
-    plt.savefig(rootdir / ("acc" + ablation + ".pdf"), transparent=transparent)
-    plt.savefig(rootdir / ("acc" + ablation + ".png"), transparent=transparent)
+    plt.savefig(rootdir / ("acc." + ablation + ".pdf"), transparent=transparent)
+    plt.savefig(rootdir / ("acc." + ablation + ".png"), transparent=transparent)
     closefig()
 
 
@@ -532,7 +560,8 @@ def plot_delta_accuracy(
         plt.xlabel("Value Slack")
         plt.ylabel(r"$\Delta$Accuracy")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
         transparent = True
@@ -541,7 +570,8 @@ def plot_delta_accuracy(
         plt.ylabel(r"$\Delta$Accuracy")
         plt.title(r"Accuracy improvement of active queries over random baseline")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
         transparent = False
@@ -549,7 +579,8 @@ def plot_delta_accuracy(
         plt.xlabel(r"$\epsilon$")
         plt.ylabel(r"$\Delta$Accuracy")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
         transparent = False
@@ -562,7 +593,11 @@ def plot_delta_accuracy(
 
 
 def plot_individual_fpr(
-    df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n", n_replications: int = 10,
+    df: pd.DataFrame,
+    rootdir: Path,
+    ablation: str,
+    hue: str = "n",
+    n_replications: int = 10,
 ) -> None:
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
@@ -585,11 +620,12 @@ def plot_individual_fpr(
         plt.ylabel("False Positive Rate")
         plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
-        plt.savefig(rootdir / str(i) / ("fpr" + ablation + ".pdf"))
-        plt.savefig(rootdir / str(i) / ("fpr" + ablation + ".png"))
+        plt.savefig(rootdir / str(i) / ("fpr." + ablation + ".pdf"))
+        plt.savefig(rootdir / str(i) / ("fpr." + ablation + ".png"))
         closefig()
 
 
@@ -598,16 +634,25 @@ def plot_largest_fpr(df: pd.DataFrame, rootdir: Path, ablation: str, n) -> None:
     df = df[df.n == n]
     plt.figure(figsize=(10, 10))
 
-    g = sns.relplot(x="epsilon", y="fpr", kind="line", data=df, ci=80, legend="brief", aspect=2,)
+    g = sns.relplot(
+        x="epsilon",
+        y="fpr",
+        kind="line",
+        data=df,
+        ci=80,
+        legend="brief",
+        aspect=2,
+    )
 
     plt.xlabel(r"$\epsilon$")
     plt.ylabel("False Postive Rate")
     plt.title(r"$\epsilon$-Relaxation's Effect on FPR")
     plt.xticks(
-        ticks=xticks, labels=xlabels,
+        ticks=xticks,
+        labels=xlabels,
     )
-    plt.savefig(rootdir / ("fpr.largest" + ablation + ".pdf"))
-    plt.savefig(rootdir / ("fpr.largest" + ablation + ".png"))
+    plt.savefig(rootdir / ("fpr.largest." + ablation + ".pdf"))
+    plt.savefig(rootdir / ("fpr.largest." + ablation + ".png"))
     closefig()
 
 
@@ -631,15 +676,20 @@ def plot_tp(df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n") -> N
     plt.ylabel("\% True Positives")
     plt.title(r"$\epsilon$-Relaxation's Effect on TP \%")
     plt.xticks(
-        ticks=xticks, labels=xlabels,
+        ticks=xticks,
+        labels=xlabels,
     )
     plt.ylim((0, 1.01))
-    plt.savefig(rootdir / ("tp" + ablation + ".pdf"))
-    plt.savefig(rootdir / ("tp" + ablation + ".png"))
+    plt.savefig(rootdir / ("tp." + ablation + ".pdf"))
+    plt.savefig(rootdir / ("tp." + ablation + ".png"))
 
 
 def plot_individual_tp(
-    df: pd.DataFrame, rootdir: Path, ablation: str, hue: str = "n", n_replications: int = 10,
+    df: pd.DataFrame,
+    rootdir: Path,
+    ablation: str,
+    hue: str = "n",
+    n_replications: int = 10,
 ) -> None:
     palette, hue_order = get_hue(hue, df)
     xticks, xlabels = make_xaxis(lower=df.epsilon.min(), upper=df.epsilon.max())
@@ -662,11 +712,12 @@ def plot_individual_tp(
         plt.ylabel("\% True Positives")
         plt.title(r"$\epsilon$-Relaxation's Effect on TP \%")
         plt.xticks(
-            ticks=xticks, labels=xlabels,
+            ticks=xticks,
+            labels=xlabels,
         )
         plt.ylim((0, 1.01))
-        plt.savefig(rootdir / str(i) / ("tp" + ablation + ".pdf"))
-        plt.savefig(rootdir / str(i) / ("tp" + ablation + ".png"))
+        plt.savefig(rootdir / str(i) / ("tp." + ablation + ".pdf"))
+        plt.savefig(rootdir / str(i) / ("tp." + ablation + ".png"))
         closefig()
 
 
@@ -761,7 +812,10 @@ def human(
     outdir = Path(outdir)
     setup_plt(font_size, use_dark_background)
 
-    confusion = make_human_confusion(label_path=label_path, prediction_path=prediction_path,)
+    confusion = make_human_confusion(
+        label_path=label_path,
+        prediction_path=prediction_path,
+    )
     plot_fpr(confusion, outdir, ablation, style, hue="n")
     plot_fnr(confusion, outdir, ablation, style, hue="n")
     plot_accuracy(confusion, outdir, ablation, hue="n", style=style, n_labels=6, ticks_per_label=5)
@@ -774,4 +828,4 @@ def human(
 
 
 if __name__ == "__main__":
-    fire.Fire()
+    fire.Fire({"comparison": comparison, "gt": gt, "human": human})
