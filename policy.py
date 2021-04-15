@@ -141,10 +141,14 @@ def train(
             if plot_episodes and t != 0:
                 plot_heading(
                     heading=episode_reward_feautures[:, 2],
-                    outdir=outdir,
+                    outdir=outdir / "plots" / "heading",
                     name=str(t // save_period),
                 )
-                plot_turn(turn=episode_actions[:, 0], outdir=outdir, name=str(t // save_period))
+                plot_turn(
+                    turn=episode_actions[:, 0],
+                    outdir=outdir / "plots" / "turn",
+                    name=str(t // save_period),
+                )
             td3.save(str(outdir / model_name))
 
             eval_return = eval(
