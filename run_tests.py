@@ -187,9 +187,9 @@ def simulated(
 
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # if n_random_test_questions is not None:
-    #     # Fire defaults to parsing something as a string if its optional
-    #     n_random_test_questions = int(n_random_test_questions)
+    if n_random_test_questions is not None:
+        # Argh defaults to parsing something as a string if its optional
+        n_random_test_questions = int(n_random_test_questions)
 
     flags = pickle.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
