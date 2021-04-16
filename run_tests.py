@@ -126,7 +126,7 @@ def simulated(
     flags_name: Path = Path("flags.pkl"),
     datadir: Path = Path(),
     outdir: Path = Path(),
-    model_dir: Path = Path(),
+    model_dir: Optional[Path] = None,
     use_equiv: bool = False,
     use_mean_reward: bool = False,
     use_random_test_questions: bool = False,
@@ -147,7 +147,11 @@ def simulated(
 
     if replications is not None:
         replication_indices = parse_replications(replications)
-        model_dirs = make_td3_paths(model_dir, replication_indices)
+        model_dirs: Sequence[Optional[Path]] = (
+            make_td3_paths(model_dir, replication_indices)
+            if not legacy_test_rewards
+            else [None] * len(replication_indices)
+        )
 
         for replication, model_dir in zip(replication_indices, model_dirs):
             if not (datadir / str(replication)).exists():
@@ -268,6 +272,7 @@ def simulated(
         )
 
     if not legacy_test_rewards:
+        assert model_dir is not None
         test_rewards = make_test_rewards(
             epsilons=epsilons,
             true_reward=true_reward,
