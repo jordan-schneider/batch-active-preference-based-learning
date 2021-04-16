@@ -121,6 +121,7 @@ class TestFactory:
     ):
         if self.use_mean_reward:
             reward = np.mean(rewards, axis=0)
+            logging.info(f"Mean reward for epsilon filtering={reward}")
             filtered_indices = filtered_normals @ reward > epsilon
         elif delta is not None:
             opinions = np.dot(rewards, filtered_normals.T).T

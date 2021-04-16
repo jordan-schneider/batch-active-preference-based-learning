@@ -249,6 +249,7 @@ def simulated(
 
     if use_random_test_questions:
         logging.info("Making random test")
+        logging.info(f"True reward: {true_reward}")
         normals, preferences, input_features = make_random_test(
             n_random_test_questions,
             elicited_input_features,
@@ -259,6 +260,11 @@ def simulated(
             sim=env,
             use_equiv=use_equiv,
         )
+
+        logging.info(
+            f"{np.mean((true_reward @ normals.T) > 0)*100:2f}% of new test questions agree with gt reward."
+        )
+
         assert_normals(normals, use_equiv)
     else:
         preferences = elicited_preferences
@@ -848,6 +854,7 @@ def make_random_test(
         query_type,
         equiv_size,
     )
+    logging.info(f"Mean posterior reward for use in random test: {mean_reward}")
     inputs = make_random_questions(n_random_test_questions, sim)
     input_features, normals = make_normals(inputs, sim, use_equiv)
     preferences = normals @ mean_reward > 0
