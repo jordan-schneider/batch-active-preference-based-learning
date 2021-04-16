@@ -153,8 +153,11 @@ class TestFactory:
         filtered_normals = normals
         indices = np.array(range(filtered_normals.shape[0]))
 
+        logging.info(f"Starting with {len(filtered_normals)} questions")
+
         if not self.skip_dedup:
             filtered_normals, indices = self.remove_duplicates(normals)
+            logging.info(f"{len(filtered_normals)} questions after deduplication")
 
         if not self.skip_noise_filtering and noise_threshold is not None:
             if rewards is None:
@@ -169,7 +172,7 @@ class TestFactory:
                 normals, filtered_normals, indices, rewards, noise_threshold
             )
 
-            logging.info(f"After noise filtering there are {len(indices)} questions.")
+            logging.info(f"{len(indices)} questions after noise filtering")
 
         if not self.skip_epsilon_filtering and filtered_normals.shape[0] > 0:
             if not self.deterministic and self.n_reward_samples is not None:
@@ -179,7 +182,7 @@ class TestFactory:
             filtered_normals, indices = self.margin_filter(
                 normals, filtered_normals, indices, rewards, epsilon, delta
             )
-            logging.info(f"After epsilon delta filtering there are {len(indices)} questions.")
+            logging.info(f"{len(indices)} questions after epsilon delta filtering")
 
         if not self.skip_redundancy_filtering and filtered_normals.shape[0] > 1:
             # Remove redundant halfspaces
@@ -189,6 +192,6 @@ class TestFactory:
             indices = indices[constraint_indices]
             assert np.all(normals[indices] == filtered_normals)
 
-            logging.info(f"After removing redundancies there are {len(indices)} questions.")
+            logging.info(f"{len(indices)} questions after removing redundancies")
 
         return filtered_normals, indices
