@@ -263,8 +263,15 @@ def eval(
     return empirical_return
 
 
-def compare(reward_path: Path, td3_dir: Path):
-    logging.basicConfig(level="DEBUG")
+def compare(reward_path: Path, td3_dir: Path, replications: Optional[str] = None):
+    logging.basicConfig(level="INFO")
+    if replications is not None:
+        replication_indices = parse_replications(replications)
+        td3_paths = make_td3_paths(Path(td3_dir), replication_indices)
+        for replication, td3_path in zip(replication_indices, td3_paths):
+            compare(Path(reward_path) / str(replication) / "true_reward.npy", td3_path)
+        exit()
+
     reward_weights = np.load(reward_path).astype(np.float32)
     env = gym.make("LegacyDriver-v1", reward=reward_weights)
     td3 = load_td3(env, td3_dir)
@@ -272,7 +279,7 @@ def compare(reward_path: Path, td3_dir: Path):
     traj_optimizer = TrajOptimizer(10)
     opt_traj = traj_optimizer.make_opt_traj(reward_weights)
 
-    logging.info(f"opt_traj={opt_traj.shape}")
+    logging.debug(f"opt_traj={opt_traj.shape}")
 
     env.reset()
     opt_return = 0.0
