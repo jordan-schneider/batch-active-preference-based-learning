@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../driver-env"
+		},
+		{
+			"path": "../TD3"
+		}
+	],
+}

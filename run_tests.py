@@ -20,7 +20,6 @@ tf.config.set_visible_devices([], "GPU")  # Car simulation stuff is faster on cp
 
 import torch  # type: ignore
 from argh import arg
-from driver.legacy.gym_driver import GymDriver
 from driver.legacy.models import Driver
 from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
@@ -147,11 +146,12 @@ def simulated(
 
     if replications is not None:
         replication_indices = parse_replications(replications)
-        model_dirs: Sequence[Optional[Path]] = (
-            make_td3_paths(model_dir, replication_indices)
-            if not legacy_test_rewards
-            else [None] * len(replication_indices)
-        )
+
+        if legacy_test_rewards:
+            model_dirs: Sequence[Optional[Path]] = [None] * len(replication_indices)
+        else:
+            assert model_dir is not None
+            model_dirs = make_td3_paths(model_dir, replication_indices)
 
         for replication, model_dir in zip(replication_indices, model_dirs):
             if not (datadir / str(replication)).exists():
@@ -559,7 +559,7 @@ def rewards_aligned(
 
         raw_states = np.array([env.observation_space.sample() for _ in range(n_test_states)])
         assert raw_states.shape == (n_test_states, *state_shape)
-        reward_features = GymDriver.get_feature_batch(raw_states)
+        reward_features = env.main_car.features(raw_states).numpy()
         states = make_TD3_state(raw_states, reward_features)
         opt_actions = td3.select_action(states)
         opt_values: np.ndarray = (

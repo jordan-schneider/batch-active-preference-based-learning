@@ -3,12 +3,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
-import driver  # type: ignore
+import driver.gym  # type: ignore
 import fire  # type: ignore
 import gym  # type: ignore
 import numpy as np
-from driver.legacy.gym_driver import GymDriver  # type: ignore
-from driver.legacy.models import Driver
+from driver.gym.legacy_env import LegacyEnv
 from joblib import Parallel, delayed  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
 from TD3 import Td3, load_td3  # type: ignore
@@ -41,7 +40,6 @@ def train(
     batch_size: int = 256,
     save_period: int = int(5e3),
     model_name: str = "policy",
-    horizon: int = 50,
     timestamp: bool = False,
     random_start: bool = False,
     replications: Optional[str] = None,
@@ -67,7 +65,6 @@ def train(
                 batch_size=batch_size,
                 save_period=save_period,
                 model_name=model_name,
-                horizon=horizon,
                 timestamp=timestamp,
                 random_start=random_start,
             )
@@ -81,9 +78,7 @@ def train(
     logging.basicConfig(filename=outdir / "log", level=verbosity)
 
     reward_weights = np.load(reward_path)
-    env = gym.make(
-        "LegacyDriver-v1", reward=reward_weights, horizon=horizon, random_start=random_start
-    )
+    env = gym.make("LegacyDriver-v1", reward=reward_weights, random_start=random_start)
     action_shape = env.action_space.sample().shape
     logging.info("Initialized env")
 
@@ -100,10 +95,12 @@ def train(
     logging.info("Initialized TD3 algorithm")
 
     raw_state = env.reset()
-    state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
+    state = make_TD3_state(
+        raw_state, reward_features=env.main_car.features(raw_state, None).numpy()
+    )
 
-    episode_reward_feautures = np.empty((env.horizon, *env.reward_weights.shape))
-    episode_actions = np.empty((env.horizon, *env.action_space.shape))
+    episode_reward_feautures = np.empty((env.HORIZON, *env.reward_weights.shape))
+    episode_actions = np.empty((env.HORIZON, *env.action_space.shape))
     best_return = float("-inf")
     for t in range(n_timesteps):
         action = pick_action(t, n_random_timesteps, env, td3, state, exploration_noise)
@@ -113,15 +110,15 @@ def train(
 
         # Log episode features
         reward_features = info["reward_features"]
-        if save_period - (t % save_period) <= env.horizon:
-            episode_reward_feautures[t % env.horizon] = reward_features
-            episode_actions[t % env.horizon] = action
+        if save_period - (t % save_period) <= env.HORIZON:
+            episode_reward_feautures[t % env.HORIZON] = reward_features
+            episode_actions[t % env.HORIZON] = action
 
         if done:
-            assert t % horizon == horizon - 1, f"Done at t={t} when horizon={horizon}"
+            assert t % env.HORIZON == env.HORIZON - 1, f"Done at t={t} when horizon={env.HORIZON}"
             next_raw_state = env.reset()
             next_state = make_TD3_state(
-                raw_state, reward_features=GymDriver.get_features(next_raw_state)
+                raw_state, reward_features=env.main_car.features(next_raw_state, None).numpy()
             )
         else:
             next_state = make_TD3_state(next_raw_state, reward_features)
@@ -156,7 +153,6 @@ def train(
                 td3=td3,
                 writer=writer,
                 log_iter=t // save_period,
-                horizon=horizon,
             )
             if eval_return > best_return:
                 best_return = eval_return
@@ -166,7 +162,7 @@ def train(
 def pick_action(
     t: int,
     n_random_timesteps: int,
-    env: GymDriver,
+    env: LegacyEnv,
     td3: Td3,
     state: np.ndarray,
     exploration_noise: float,
@@ -219,7 +215,7 @@ def log_step(
 
 
 def make_td3(
-    env: GymDriver,
+    env: LegacyEnv,
     actor_kwargs: Dict[str, Any] = {},
     critic_kwargs: Dict[str, Any] = {},
     writer: Optional[SummaryWriter] = None,
@@ -246,15 +242,16 @@ def eval(
     td3: Td3,
     writer: Optional[SummaryWriter] = None,
     log_iter: Optional[int] = None,
-    horizon: int = 50,
 ):
     logging.info("Evaluating the policy")
-    env = gym.make("LegacyDriver-v1", reward=reward_weights, horizon=horizon)
+    env = gym.make("LegacyDriver-v1", reward=reward_weights)
 
     raw_state = env.reset()
-    state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
+    state = make_TD3_state(
+        raw_state, reward_features=env.main_car.features(raw_state, None).numpy()
+    )
     rewards = []
-    for t in range(horizon):
+    for t in range(50):
         raw_state, reward, done, info = env.step(td3.select_action(state))
         state = make_TD3_state(raw_state=raw_state, reward_features=info["reward_features"])
         rewards.append(reward)
@@ -266,26 +263,32 @@ def eval(
     return empirical_return
 
 
-def compare(reward_path: Path, td3_dir: Path, horizon: int = 50):
-    logging.basicConfig(level="INFO")
-    reward_weights = np.load(reward_path)
-    env = gym.make("LegacyDriver-v1", reward=reward_weights, horizon=horizon)
+def compare(reward_path: Path, td3_dir: Path):
+    logging.basicConfig(level="DEBUG")
+    reward_weights = np.load(reward_path).astype(np.float32)
+    env = gym.make("LegacyDriver-v1", reward=reward_weights)
     td3 = load_td3(env, td3_dir)
-    empirical_return = eval(reward_weights, td3, horizon=horizon)
 
     traj_optimizer = TrajOptimizer(10)
     opt_traj = traj_optimizer.make_opt_traj(reward_weights)
-    simulation_object = Driver()
-    simulation_object.set_ctrl(opt_traj)
-    features = simulation_object.get_features()
-    opt_return = reward_weights @ features
+
+    logging.info(f"opt_traj={opt_traj.shape}")
+
+    env.reset()
+    opt_return = 0.0
+    for action in opt_traj:
+        state, reward, done, info = env.step(action)
+        opt_return += reward
+
+    opt_return = opt_return / 50
+
+    empirical_return = eval(reward_weights, td3)
     logging.info(f"Optimal return={opt_return}, empirical return={empirical_return}")
 
 
 def refine(
     reward_path: Path,
     td3_dir: Path,
-    horizon: int = 50,
     env_iters: int = int(1e5),
     batch_size: int = 100,
     replications: Optional[Union[str, Tuple[int, ...]]] = None,
@@ -300,7 +303,6 @@ def refine(
             delayed(refine)(
                 reward_path=reward_dir / str(i) / reward_name,
                 td3_dir=td3_path,
-                horizon=horizon,
                 env_iters=env_iters,
                 batch_size=batch_size,
             )
@@ -311,14 +313,16 @@ def refine(
     writer = SummaryWriter(log_dir=td3_dir.parent, filename_suffix="refine")
 
     reward_weights = np.load(reward_path)
-    env = gym.make("LegacyDriver-v1", reward=reward_weights, horizon=horizon)
+    env = gym.make("LegacyDriver-v1", reward=reward_weights)
     td3 = load_td3(env, td3_dir, writer=writer)
 
     buffer = ReplayBuffer(td3.state_dim, td3.action_dim, writer=writer)
     logging.info("Initialized TD3 algorithm")
 
     raw_state = env.reset()
-    state = make_TD3_state(raw_state, reward_features=GymDriver.get_features(raw_state))
+    state = make_TD3_state(
+        raw_state, reward_features=env.main_car.features(raw_state, None).numpy()
+    )
 
     for t in range(env_iters):
         action = td3.select_action(state)
@@ -328,10 +332,10 @@ def refine(
         reward_features = info["reward_features"]
 
         if done:
-            assert t % horizon == horizon - 1, f"Done at t={t} when horizon={horizon}"
+            assert t % env.HORIZON == env.HORIZON - 1, f"Done at t={t} when horizon={env.HORIZON}"
             next_raw_state = env.reset()
             next_state = make_TD3_state(
-                next_raw_state, reward_features=GymDriver.get_features(next_raw_state)
+                next_raw_state, reward_features=env.main_car.features(next_raw_state, None).numpy()
             )
         else:
             next_state = make_TD3_state(next_raw_state, reward_features)

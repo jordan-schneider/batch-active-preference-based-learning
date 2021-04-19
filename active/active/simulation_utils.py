@@ -82,7 +82,8 @@ class TrajOptimizer:
 
         self.planner_car.weights = reward
 
-        plan = self.planner_car._get_next_control().numpy()
+        self.planner_car._get_next_control()
+        plan = np.array([action.numpy() for action in self.planner_car.plan])
         return plan
 
 
