@@ -11,7 +11,7 @@ from driver.gym.legacy_env import LegacyEnv
 from joblib import Parallel, delayed  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
 from TD3 import Td3, load_td3  # type: ignore
-from TD3.utils import ReplayBuffer  # type: ignore
+from TD3.utils import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from active.simulation_utils import TrajOptimizer  # type: ignore
@@ -148,6 +148,7 @@ def train(
                 )
             td3.save(str(outdir / model_name))
 
+            logging.info("Evaluating the policy")
             eval_return = eval(
                 reward_weights,
                 td3=td3,
@@ -242,11 +243,15 @@ def eval(
     td3: Td3,
     writer: Optional[SummaryWriter] = None,
     log_iter: Optional[int] = None,
+    start_state: Optional[np.ndarray] = None,
 ):
-    logging.info("Evaluating the policy")
-    env = gym.make("LegacyDriver-v1", reward=reward_weights)
+    env: LegacyEnv = gym.make("LegacyDriver-v1", reward=reward_weights)
 
     raw_state = env.reset()
+    if start_state is not None:
+        env.state = start_state
+        raw_state = start_state
+
     state = make_TD3_state(
         raw_state, reward_features=env.main_car.features(raw_state, None).numpy()
     )
@@ -256,15 +261,23 @@ def eval(
         state = make_TD3_state(raw_state=raw_state, reward_features=info["reward_features"])
         rewards.append(reward)
     assert done
+
     empirical_return = np.mean(rewards)
     if writer is not None:
         assert log_iter is not None
         writer.add_scalar("Eval/return", empirical_return, log_iter)
+
     return empirical_return
 
 
 def compare(
-    reward_path: Path, td3_dir: Path, replications: Optional[str] = None, planner_iters: int = 10
+    reward_path: Path,
+    td3_dir: Path,
+    outdir: Path,
+    planner_iters: int = 10,
+    random_start: bool = False,
+    n_starts: int = 1,
+    replications: Optional[str] = None,
 ):
     logging.basicConfig(level="INFO")
     if replications is not None:
@@ -273,28 +286,49 @@ def compare(
         for replication, td3_path in zip(replication_indices, td3_paths):
             compare(
                 reward_path=Path(reward_path) / str(replication) / "true_reward.npy",
+                outdir=Path(outdir) / str(replication) / "comparison_plots",
                 td3_dir=td3_path,
                 planner_iters=planner_iters,
+                random_start=random_start,
+                n_starts=n_starts,
             )
         exit()
 
-    reward_weights = np.load(reward_path).astype(np.float32)
-    env = gym.make("LegacyDriver-v1", reward=reward_weights)
+    reward_weights: np.ndarray = np.load(reward_path).astype(np.float32)
+    env = gym.make("LegacyDriver-v1", reward=reward_weights, random_start=random_start)
+    td3 = load_td3(env, td3_dir)
 
     traj_optimizer = TrajOptimizer(planner_iters)
-    opt_traj = traj_optimizer.make_opt_traj(reward_weights)
 
-    env.reset()
-    opt_return = 0.0
-    for action in opt_traj:
-        state, reward, done, info = env.step(action)
-        opt_return += reward
+    returns = np.empty((n_starts, 2))
+    for i in range(n_starts):
+        start_state: np.ndarray = env.reset()
 
-    opt_return = opt_return / 50
+        opt_traj = traj_optimizer.make_opt_traj(reward_weights, start_state)
 
-    td3 = load_td3(env, td3_dir)
-    empirical_return = eval(reward_weights, td3)
-    logging.info(f"Optimal return={opt_return}, empirical return={empirical_return}")
+        opt_return = 0.0
+        for action in opt_traj:
+            state, reward, done, info = env.step(action)
+            opt_return += reward
+
+        opt_return = opt_return / len(opt_traj)
+
+        empirical_return = eval(reward_weights=reward_weights, td3=td3, start_state=start_state)
+
+        returns[i] = empirical_return, opt_return
+
+    plt.hist(returns[:, 0], label="Empirical")
+    plt.hist(returns[:, 1], label="Optimal")
+    plt.title("Histogram of Optimal vs Empirical returns")
+    plt.savefig(outdir / "returns.png")
+    plt.close()
+
+    regret = returns[:, 1] - returns[:, 0]
+    plt.hist(regret)
+    plt.title("Histogram of regret")
+    plt.savefig(outdir / "regret.png")
+    plt.close()
+    logging.info(f"Average regret = {np.mean(regret)}, min={np.min(regret)}, max={np.max(regret)}")
 
 
 def refine(
