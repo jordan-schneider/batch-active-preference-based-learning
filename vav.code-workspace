@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../TD3"
+		},
+		{
+			"path": "../vav_discrete"
 		}
 	],
 }

@@ -319,8 +319,8 @@ def compare(
 
     outdir.mkdir(parents=True, exist_ok=True)
 
-    plt.hist(returns[:, 0], label="Empirical")
-    plt.hist(returns[:, 1], label="Optimal")
+    plt.hist(returns[:, 0], label="Empirical", opacity=0.5)
+    plt.hist(returns[:, 1], label="Optimal", opacity=0.5)
     plt.title("Histogram of Optimal vs Empirical returns")
     plt.legend()
     plt.savefig(outdir / "returns.png")
