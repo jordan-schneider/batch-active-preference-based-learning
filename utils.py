@@ -148,7 +148,17 @@ def make_td3_paths(td3_path: Path, replication_indices: List[int]) -> List[Path]
         replication_dir = td3_path / str(i)
         # Each replication folder contains directories whose names are timestamps
         children = [child.name for child in replication_dir.iterdir() if child.is_dir()]
-        most_recent_child = children[np.argmax([arrow.get(child) for child in children])]  # type: ignore
+
+        timestamp_dirs = []
+        timestamps = []
+        for child in children:
+            try:
+                timestamps.append(arrow.get(child))
+                timestamp_dirs.append(child)
+            except arrow.ParserError:
+                logging.warning(f"Ignoring non-timestamp directory {child}")
+
+        most_recent_child = timestamp_dirs[np.argmax(timestamps)]  # type: ignore
         td3_dir = replication_dir / most_recent_child
         # Within each dir is a set of best_X_actor, best_X_critic, etc files
         # We need to provide best_X to the path
