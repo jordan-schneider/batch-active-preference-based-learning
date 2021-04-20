@@ -75,6 +75,10 @@ def parse_replications(replications: Union[str, Tuple[int, ...]]) -> List[int]:
             return [int(token) for token in replications.split(",")]
         else:
             return list(range(1, int(replications) + 1))
+    elif isinstance(replications, int):
+        return list(range(1, int(replications) + 1))
+    else:
+        raise ValueError(f"Unsupported replications string {replications}")
 
 
 def save_reward(
