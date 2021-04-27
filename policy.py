@@ -5,9 +5,12 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import driver.gym  # type: ignore
 import fire  # type: ignore
-import gym  # type: ignore
+import gym
 import numpy as np
 from driver.gym.legacy_env import LegacyEnv
+from gym.spaces import Discrete  # type: ignore
+from gym.spaces import Tuple as GymTuple
+from gym.spaces import flatdim
 from joblib import Parallel, delayed  # type: ignore
 from matplotlib import pyplot as plt  # type: ignore
 from TD3 import Td3, load_td3  # type: ignore
@@ -110,6 +113,7 @@ def train(
     logging.info("Initialized TD3 algorithm")
 
     raw_state = env.reset()
+    logging.debug(f"raw_state={raw_state}")
     state = make_TD3_state(
         raw_state,
         reward_features=env.features(raw_state),
@@ -263,11 +267,9 @@ def make_td3(
     Returns:
         Td3: [description]
     """
-    # TODO(joshnei): Make reward features a flag and pull this out into a conditional.
-    state_dim = np.prod(env.observation_space.shape) + len(env.reward_weights.shape)
-    if reward_condition:
-        state_dim += len(env.reward_weights.shape)
-    action_dim = np.prod(env.action_space.shape)
+    state_dim = state_dims(env.observation_space)
+    logging.debug(f"state_dim={state_dim}")
+    action_dim = state_dims(env.action_space)
     # TODO(joschnei): Clamp expects a float, but we should use the entire vector here.
     max_action = max(np.max(env.action_space.high), -np.min(env.action_space.low))
 
@@ -284,6 +286,17 @@ def make_td3(
     return td3
 
 
+def state_dims(space: gym.Space) -> int:
+    if isinstance(space, Discrete):
+        # The whole reason for this function is that time_remaining is both discrete and only takes
+        # up one nn input dimension.
+        return 1
+    elif isinstance(space, GymTuple):
+        return sum(state_dims(inner) for inner in space)
+    else:
+        return flatdim(space)
+
+
 def eval(
     reward_weights: np.ndarray,
     td3: Td3,
@@ -291,7 +304,7 @@ def eval(
     log_iter: Optional[int] = None,
     start_state: Optional[np.ndarray] = None,
 ):
-    env: LegacyEnv = gym.make("LegacyDriver-v1", reward=reward_weights)
+    env: LegacyEnv = gym.make("LegacyDriver-v1", reward=reward_weights, time_in_state=True)
 
     raw_state = env.reset()
     if start_state is not None:

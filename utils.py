@@ -64,6 +64,8 @@ def make_TD3_state(
         # We've recieved a single unflattened state, possibly with time remaining.
         assert reward_features.shape == (4,)
 
+        # logging.debug(f"time_remaining={time_remaining}")
+
         # Return a single flattened (8 + 1? + 4) length vector
         state = np.concatenate(
             (
@@ -81,6 +83,7 @@ def make_TD3_state(
         raise ValueError(f"{raw_state} is not a valid state or state batch")
 
     if reward_weights is not None:
+        logging.debug("Appending reward weights")
         axis = 0 if len(state.shape) == 1 else 1
         state = np.concatenate(state, reward_weights, axis=axis)
 
