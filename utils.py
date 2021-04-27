@@ -35,9 +35,20 @@ def make_gaussian_rewards(
     return rewards
 
 
-def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.ndarray:
+def make_TD3_state(
+    raw_state: Union[np.ndarray, Tuple[np.ndarray, int]],
+    reward_features: np.ndarray,
+    reward_weights: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    time_remaining = None
+    if isinstance(raw_state, tuple):
+        raw_state, time_remaining = raw_state
+
     if len(raw_state.shape) == 3:
+        # If the length is 3, then I'm getting a batch of unflattened car states without time remaining
         assert raw_state.shape[1:] == (2, 4)
+
+        # Reward features should be a batch of (n, 4) where n is the batch size
         assert len(reward_features.shape) == 2
         assert reward_features.shape[1:] == (
             4,
@@ -45,17 +56,33 @@ def make_TD3_state(raw_state: np.ndarray, reward_features: np.ndarray) -> np.nda
         assert raw_state.shape[0] == reward_features.shape[0]
 
         n = raw_state.shape[0]
-        raw_state = raw_state.reshape(-1, 8)
-        assert raw_state.shape == (n, 8)
+        raw_state = raw_state.reshape(n, 8)
 
+        # Return a batch of (n, 8 + 4 = 12) raw input vectors
         state = np.concatenate((raw_state, reward_features), axis=1)
-    elif len(raw_state.shape) == 2:
-        assert len(reward_features.shape) == 1
-        assert raw_state.shape == (2, 4)
-        raw_state = raw_state.flatten()
-        assert raw_state.shape == (8,)
+    elif raw_state.shape == (2, 4):
+        # We've recieved a single unflattened state, possibly with time remaining.
+        assert reward_features.shape == (4,)
 
-        state = np.concatenate((raw_state, reward_features))
+        # Return a single flattened (8 + 1? + 4) length vector
+        state = np.concatenate(
+            (
+                raw_state.flatten(),
+                [time_remaining] if time_remaining is not None else [],
+                reward_features,
+            )
+        )
+    elif len(raw_state.shape) == 2 and raw_state.shape[1] == 9:
+        assert raw_state.shape[0] == reward_features.shape[0]
+        assert reward_features.shape[1] == 4
+        # Return (n, 9 + 4) full batch
+        state = np.concatenate(raw_state, reward_features, axis=1)
+    else:
+        raise ValueError(f"{raw_state} is not a valid state or state batch")
+
+    if reward_weights is not None:
+        axis = 0 if len(state.shape) == 1 else 1
+        state = np.concatenate(state, reward_weights, axis=axis)
 
     return state
 

@@ -29,17 +29,19 @@ def make_outdir(outdir: Union[str, Path], timestamp: bool = False) -> Path:
 
 
 def train(
-    reward_path: Path,
     outdir: Path,
+    reward_path: Path = Path(),
     actor_layers: List[int] = [256, 256],
     critic_layers: List[int] = [256, 256],
     dense: bool = False,
+    use_reward_features: bool = True,
     n_timesteps: int = int(1e6),
     n_random_timesteps: int = int(25e3),
     exploration_noise: float = 0.1,
     batch_size: int = 256,
     save_period: int = int(5e3),
     model_name: str = "policy",
+    random_rewards: bool = False,
     timestamp: bool = False,
     random_start: bool = False,
     replications: Optional[str] = None,
@@ -51,10 +53,15 @@ def train(
     if replications is not None:
         replication_indices = parse_replications(replications)
 
-        reward_dir, reward_name = make_reward_path(reward_path)
+        if not random_rewards:
+            reward_dir, reward_name = make_reward_path(reward_path)
+            reward_paths = [reward_dir / str(i) / reward_name for i in replication_indices]
+        else:
+            reward_paths = [None for _ in replication_indices]
+
         Parallel(n_jobs=-2)(
             delayed(train)(
-                reward_path=reward_dir / str(i) / reward_name,
+                reward_path=reward_path,
                 outdir=Path(outdir) / str(i),
                 actor_layers=actor_layers,
                 critic_layers=critic_layers,
@@ -67,8 +74,9 @@ def train(
                 model_name=model_name,
                 timestamp=timestamp,
                 random_start=random_start,
+                random_rewards=random_rewards,
             )
-            for i in replication_indices
+            for i, reward_path in zip(replication_indices, reward_paths)
         )
         exit()
 
@@ -77,8 +85,14 @@ def train(
     writer = SummaryWriter(log_dir=outdir)
     logging.basicConfig(filename=outdir / "log", level=verbosity)
 
-    reward_weights = np.load(reward_path)
-    env = gym.make("LegacyDriver-v1", reward=reward_weights, random_start=random_start)
+    if not random_rewards:
+        reward_weights = np.load(reward_path)
+        env: LegacyEnv = gym.make(
+            "LegacyDriver-v1", reward=reward_weights, random_start=random_start, time_in_state=True
+        )
+    else:
+        env = gym.make("RandomLegacyDriver-v1", random_start=random_start, time_in_state=True)
+
     action_shape = env.action_space.sample().shape
     logging.info("Initialized env")
 
@@ -90,16 +104,19 @@ def train(
             actor_kwargs={"layers": actor_layers, "dense": dense},
             critic_kwargs={"layers": critic_layers, "dense": dense},
             writer=writer,
+            extra_state_dim=(random_rewards + use_reward_features) * len(env.reward),
         )
-    buffer = ReplayBuffer(td3.state_dim, td3.action_dim, writer=writer)
+    buffer = ReplayBuffer(td3.state_dim + td3.extra_state_dim, td3.action_dim, writer=writer)
     logging.info("Initialized TD3 algorithm")
 
     raw_state = env.reset()
     state = make_TD3_state(
-        raw_state, reward_features=env.main_car.features(raw_state, None).numpy()
+        raw_state,
+        reward_features=env.features(raw_state),
+        reward_weights=env.reward_weights if random_rewards else None,
     )
 
-    episode_reward_feautures = np.empty((env.HORIZON, *env.reward_weights.shape))
+    episode_reward_feautures = np.empty((env.HORIZON, *env.reward.shape))
     episode_actions = np.empty((env.HORIZON, *env.action_space.shape))
     best_return = float("-inf")
     for t in range(n_timesteps):
@@ -118,10 +135,16 @@ def train(
             assert t % env.HORIZON == env.HORIZON - 1, f"Done at t={t} when horizon={env.HORIZON}"
             next_raw_state = env.reset()
             next_state = make_TD3_state(
-                raw_state, reward_features=env.main_car.features(next_raw_state, None).numpy()
+                raw_state,
+                reward_features=env.features(next_raw_state),
+                reward_weights=env.reward_weights if random_rewards else None,
             )
         else:
-            next_state = make_TD3_state(next_raw_state, reward_features)
+            next_state = make_TD3_state(
+                next_raw_state,
+                reward_features,
+                reward_weights=info["reward_weights"] if random_rewards else None,
+            )
 
         # Store data in replay buffer
         buffer.add(state, action, next_state, reward, done=float(done))
@@ -149,6 +172,11 @@ def train(
             td3.save(str(outdir / model_name))
 
             logging.info("Evaluating the policy")
+            # TODO(joschnei): If random_rewards, generate either a fixed or random-per-eval bag of
+            # eval rewards and save the policy if it has better mean return over the bag of
+            # eval-rewards. Otherwise just use the fixed reward.
+            if random_rewards:
+                raise NotImplementedError("Random rewards haven't been fully implemented yet.")
             eval_return = eval(
                 reward_weights,
                 td3=td3,
@@ -198,7 +226,7 @@ def plot_turn(turn: np.ndarray, outdir: Path, name: str = "") -> None:
 
 
 def log_step(
-    state: np.ndarray,
+    state: LegacyEnv.State,
     action: np.ndarray,
     reward: float,
     info: dict,
@@ -220,14 +248,32 @@ def make_td3(
     actor_kwargs: Dict[str, Any] = {},
     critic_kwargs: Dict[str, Any] = {},
     writer: Optional[SummaryWriter] = None,
+    reward_condition: bool = False,
+    extra_state_dim: int = 0,
 ) -> Td3:
-    state_dim = np.prod(env.observation_space.shape) + env.reward_weights.shape[0]
+    """Makes a TD3 object
+
+    Args:
+        env (LegacyEnv): Environment the agent is interacting with
+        actor_kwargs (Dict[str, Any], optional): Actor keyword arguments. Defaults to {}.
+        critic_kwargs (Dict[str, Any], optional): Critic keyword arguments. Defaults to {}.
+        writer (Optional[SummaryWriter], optional): tensorboard writer object. Defaults to None.
+        reward_condition (bool, optional): If the model should be conditioned on the current reward weights. Defaults to False.
+
+    Returns:
+        Td3: [description]
+    """
+    # TODO(joshnei): Make reward features a flag and pull this out into a conditional.
+    state_dim = np.prod(env.observation_space.shape) + len(env.reward_weights.shape)
+    if reward_condition:
+        state_dim += len(env.reward_weights.shape)
     action_dim = np.prod(env.action_space.shape)
     # TODO(joschnei): Clamp expects a float, but we should use the entire vector here.
     max_action = max(np.max(env.action_space.high), -np.min(env.action_space.low))
 
     td3 = Td3(
         state_dim=state_dim,
+        extra_state_dim=extra_state_dim,
         action_dim=action_dim,
         max_action=max_action,
         actor_kwargs=actor_kwargs,
@@ -252,9 +298,7 @@ def eval(
         env.state = start_state
         raw_state = start_state
 
-    state = make_TD3_state(
-        raw_state, reward_features=env.main_car.features(raw_state, None).numpy()
-    )
+    state = make_TD3_state(raw_state, reward_features=env.features(raw_state))
     rewards = []
     for t in range(50):
         raw_state, reward, done, info = env.step(td3.select_action(state))
@@ -368,9 +412,7 @@ def refine(
     logging.info("Initialized TD3 algorithm")
 
     raw_state = env.reset()
-    state = make_TD3_state(
-        raw_state, reward_features=env.main_car.features(raw_state, None).numpy()
-    )
+    state = make_TD3_state(raw_state, reward_features=env.features(raw_state))
 
     for t in range(env_iters):
         action = td3.select_action(state)

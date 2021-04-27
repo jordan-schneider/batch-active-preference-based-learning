@@ -13,6 +13,7 @@ import driver.gym
 import gym  # type: ignore
 import numpy as np
 import tensorflow as tf  # type: ignore
+from gym.spaces import flatten
 
 from search import GeometricSearch, TestRewardSearch
 
@@ -557,9 +558,14 @@ def rewards_aligned(
         action_shape = env.action_space.sample().shape
         n_rewards = len(test_rewards)
 
-        raw_states = np.array([env.observation_space.sample() for _ in range(n_test_states)])
+        raw_states = np.array(
+            [
+                flatten(env.observation_space, env.observation_space.sample())
+                for _ in range(n_test_states)
+            ]
+        )
         assert raw_states.shape == (n_test_states, *state_shape)
-        reward_features = env.main_car.features(raw_states).numpy()
+        reward_features = env.features(raw_states).numpy()
         states = make_TD3_state(raw_states, reward_features)
         opt_actions = td3.select_action(states)
         opt_values: np.ndarray = (
