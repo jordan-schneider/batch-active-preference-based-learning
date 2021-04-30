@@ -6,14 +6,27 @@ import pickle
 from functools import partial
 from itertools import product
 from pathlib import Path
-from typing import Dict, Generator, List, Literal, Optional, Sequence, Set, Tuple, Union, cast
+from typing import (
+    Dict,
+    Generator,
+    List,
+    Literal,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+    cast,
+)
 
 import argh  # type: ignore
 import driver.gym
 import gym  # type: ignore
 import numpy as np
 import tensorflow as tf  # type: ignore
-from gym.spaces import flatten
+from driver.gym.legacy_env import LegacyEnv
+from gym.spaces import flatten  # type: ignore
 
 from search import GeometricSearch, TestRewardSearch
 
@@ -429,6 +442,72 @@ def human(
 
     pickle.dump(minimal_tests, open(test_path, "wb"))
     pickle.dump(results, open(test_results_path, "wb"))
+
+
+def compare_test_labels(
+    test_rewards_path: Path,
+    true_reward_path: Path,
+    q: bool = False,
+    elicitation: bool = False,
+    replications: Optional[str] = None,
+    normals_path: Optional[Path] = None,
+    td3_dir: Optional[Path] = None,
+):
+    if replications is not None:
+        raise NotImplementedError("Replications not yet implemented")
+
+    starting_tests: Dict[float, Tuple[np.ndarray, np.ndarray]] = pickle.load(
+        open(test_rewards_path, "rb")
+    )
+
+    assert not (q == elicitation), "Provided labels must come from exactly one source"
+
+    class Test(NamedTuple):
+        rewards: np.ndarray
+        q_labels: np.ndarray
+        elicitation_labels: np.ndarray
+
+    test_rewards: Dict[float, Test] = {}
+    true_reward = np.load(true_reward_path)
+    if q:
+        normals = np.load(normals_path)
+
+        for epsilon, (rewards, q_labels) in starting_tests.items():
+            normals = normals[true_reward @ normals.T > epsilon]
+            elicitation_labels = run_test(normals, rewards, use_equiv=False)
+
+            test_rewards[epsilon] = Test(
+                rewards=rewards, q_labels=q_labels, elicitation_labels=elicitation_labels
+            )
+    elif elicitation:
+        assert td3_dir is not None
+        parallel = Parallel(n_cpus=-4)
+        env = LegacyEnv(reward=true_reward, random_start=True)
+        td3 = load_td3(env=env, filename=td3_dir)
+        traj_optimizer = TrajOptimizer(10)
+        for epsilon, (rewards, elicitation_labels) in starting_tests.items():
+            q_labels = rewards_aligned(
+                td3=td3,
+                traj_optimizer=traj_optimizer,
+                env=env,
+                test_rewards=rewards,
+                epsilon=epsilon,
+                parallel=parallel,
+            )
+
+            test_rewards[epsilon] = Test(
+                rewards=rewards, q_labels=q_labels, elicitation_labels=elicitation_labels
+            )
+
+    total_agree = 0
+    total_rewards = 0
+    for epsilon, test in test_rewards.items():
+        total_agree += np.sum(test.q_labels == test.elicitation_labels)
+        total_rewards += len(test.rewards)
+
+    print(
+        f"Critic and superset labels agree on {total_agree / total_rewards * 100 :.1f}% of rewards"
+    )
 
 
 # Test reward generation
@@ -965,4 +1044,4 @@ def load_elicitation(
 
 
 if __name__ == "__main__":
-    argh.dispatch_commands([premake_test_rewards, simulated, human])
+    argh.dispatch_commands([premake_test_rewards, simulated, human, compare_test_labels])
