@@ -1,11 +1,12 @@
 import logging
+import pickle
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import driver.gym  # type: ignore
 import fire  # type: ignore
-import gym
+import gym  # type: ignore
 import numpy as np
 from driver.gym.legacy_env import LegacyEnv
 from gym.spaces import Discrete  # type: ignore
@@ -303,8 +304,9 @@ def eval(
     writer: Optional[SummaryWriter] = None,
     log_iter: Optional[int] = None,
     start_state: Optional[np.ndarray] = None,
+    time_in_state: bool = True,
 ):
-    env: LegacyEnv = gym.make("LegacyDriver-v1", reward=reward_weights, time_in_state=True)
+    env: LegacyEnv = gym.make("LegacyDriver-v1", reward=reward_weights, time_in_state=time_in_state)
 
     raw_state = env.reset()
     if start_state is not None:
@@ -335,8 +337,9 @@ def compare(
     random_start: bool = False,
     n_starts: int = 1,
     replications: Optional[str] = None,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ):
-    logging.basicConfig(level="INFO")
+    logging.basicConfig(level=verbosity, format="%(levelname)s:%(asctime)s:%(message)s")
     if replications is not None:
         replication_indices = parse_replications(replications)
         td3_paths = make_td3_paths(Path(td3_dir), replication_indices)
@@ -348,6 +351,7 @@ def compare(
                 planner_iters=planner_iters,
                 random_start=random_start,
                 n_starts=n_starts,
+                verbosity=verbosity,
             )
         exit()
 
@@ -357,12 +361,36 @@ def compare(
 
     traj_optimizer = TrajOptimizer(planner_iters)
 
+    # TODO(joschnei): Also record the trajectory which was better
+    class BadPlannerCollection:
+        def __init__(self):
+            self.states = None
+            self.rewards = None
+
+        def append(self, state: np.ndarray, reward: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+            if self.states is None:
+                self.states = np.array([state])
+                self.rewards = np.array([reward])
+            else:
+                self.states = np.append(self.states, state)
+                self.rewards = np.append(self.rewards, reward)
+
+            return self.get()
+
+        def get(self) -> Tuple[np.ndarray, np.ndarray]:
+            return self.states, self.rewards
+
+    planner_bad = BadPlannerCollection()
+
     returns = np.empty((n_starts, 2))
     for i in range(n_starts):
+        logging.info(f"{i+1}/{n_starts}")
         start_state: np.ndarray = env.reset()
 
+        logging.info("Optimizing traj")
         opt_traj = traj_optimizer.make_opt_traj(reward_weights, start_state)
 
+        logging.info("Executing traj")
         opt_return = 0.0
         for action in opt_traj:
             state, reward, done, info = env.step(action)
@@ -370,14 +398,20 @@ def compare(
 
         opt_return = opt_return / len(opt_traj)
 
-        empirical_return = eval(reward_weights=reward_weights, td3=td3, start_state=start_state)
+        logging.info("Evaluating policy")
+        empirical_return = eval(
+            reward_weights=reward_weights, td3=td3, start_state=start_state, time_in_state=False
+        )
 
         returns[i] = empirical_return, opt_return
 
+        if opt_return < empirical_return:
+            planner_bad.append(start_state, reward_weights)
+
     outdir.mkdir(parents=True, exist_ok=True)
 
-    plt.hist(returns[:, 0], label="Empirical", opacity=0.5)
-    plt.hist(returns[:, 1], label="Optimal", opacity=0.5)
+    plt.hist(returns[:, 0], label="Empirical", alpha=0.5)
+    plt.hist(returns[:, 1], label="Optimal", alpha=0.5)
     plt.title("Histogram of Optimal vs Empirical returns")
     plt.legend()
     plt.savefig(outdir / "returns.png")
@@ -389,6 +423,8 @@ def compare(
     plt.savefig(outdir / "regret.png")
     plt.close()
     logging.info(f"Average regret = {np.mean(regret)}, min={np.min(regret)}, max={np.max(regret)}")
+
+    pickle.dump(planner_bad.get(), (outdir / "planner_mistakes.pkl").open("wb"))
 
 
 def refine(
@@ -451,6 +487,39 @@ def refine(
         td3.update_critic(*buffer.sample(batch_size))
 
         td3.save(str(td3_dir) + "_refined")
+
+
+def convert_legacy_td3(filename: Union[str, Path], replications: Optional[str] = None) -> None:
+    # We used to include reward features as part of state, but now they're extra dimensions. This
+    # function converts from the old encoding to the new one.
+
+    if replications is not None:
+        replication_indices = parse_replications(replications)
+        td3_paths = make_td3_paths(Path(filename), replication_indices)
+        for td3_path in td3_paths:
+            convert_legacy_td3(td3_path)
+        exit()
+
+    # We can't do this if we're adding more dimensions. We just have car state + reward features
+    explicit_args = pickle.load(open(str(filename) + ".meta.pkl", "rb"), fix_imports=True)
+    assert "extra_state_dim" not in explicit_args.keys()
+
+    env = gym.make("LegacyDriver-v1", reward=np.zeros(4))
+
+    state_dim = np.prod(env.observation_space.shape)
+    action_dim = np.prod(env.action_space.shape)
+
+    explicit_args["extra_state_dim"] = 4
+    max_action = max(np.max(env.action_space.high), -np.min(env.action_space.low))
+    td3 = Td3(
+        state_dim=state_dim,
+        action_dim=action_dim,
+        max_action=max_action,
+        **explicit_args,
+    )
+    td3.load(str(filename))
+
+    pickle.dump(explicit_args, open(str(filename) + ".meta.pkl", "wb"))
 
 
 if __name__ == "__main__":
