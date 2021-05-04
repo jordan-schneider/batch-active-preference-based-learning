@@ -305,6 +305,7 @@ def eval(
     log_iter: Optional[int] = None,
     start_state: Optional[np.ndarray] = None,
     time_in_state: bool = True,
+    return_actions: bool = False,
 ):
     env: LegacyEnv = gym.make("LegacyDriver-v1", reward=reward_weights, time_in_state=time_in_state)
 
@@ -314,9 +315,15 @@ def eval(
         raw_state = start_state
 
     state = make_TD3_state(raw_state, reward_features=env.features(raw_state))
+
     rewards = []
+    if return_actions:
+        actions = []
     for t in range(50):
-        raw_state, reward, done, info = env.step(td3.select_action(state))
+        action = td3.select_action(state)
+        if return_actions:
+            actions.append(action)
+        raw_state, reward, done, info = env.step(action)
         state = make_TD3_state(raw_state=raw_state, reward_features=info["reward_features"])
         rewards.append(reward)
     assert done
@@ -326,6 +333,8 @@ def eval(
         assert log_iter is not None
         writer.add_scalar("Eval/return", empirical_return, log_iter)
 
+    if return_actions:
+        return empirical_return, actions
     return empirical_return
 
 
@@ -361,24 +370,29 @@ def compare(
 
     traj_optimizer = TrajOptimizer(planner_iters)
 
-    # TODO(joschnei): Also record the trajectory which was better
     class BadPlannerCollection:
         def __init__(self):
             self.states = None
             self.rewards = None
+            self.trajs = None
 
-        def append(self, state: np.ndarray, reward: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        def append(
+            self, state: np.ndarray, reward: np.ndarray, traj: np.ndarray
+        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
             if self.states is None:
                 self.states = np.array([state])
                 self.rewards = np.array([reward])
+                self.trajs = np.array([traj])
             else:
                 self.states = np.append(self.states, state)
                 self.rewards = np.append(self.rewards, reward)
+                self.trajs = np.append(self.trajs, traj)
 
             return self.get()
 
-        def get(self) -> Tuple[np.ndarray, np.ndarray]:
-            return self.states, self.rewards
+        def get(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+            assert self.states is not None and self.rewards is not None and self.trajs is not None
+            return self.states, self.rewards, self.trajs
 
     planner_bad = BadPlannerCollection()
 
@@ -399,14 +413,18 @@ def compare(
         opt_return = opt_return / len(opt_traj)
 
         logging.info("Evaluating policy")
-        empirical_return = eval(
-            reward_weights=reward_weights, td3=td3, start_state=start_state, time_in_state=False
+        empirical_return, traj = eval(
+            reward_weights=reward_weights,
+            td3=td3,
+            start_state=start_state,
+            time_in_state=False,
+            return_actions=True,
         )
 
         returns[i] = empirical_return, opt_return
 
         if opt_return < empirical_return:
-            planner_bad.append(start_state, reward_weights)
+            planner_bad.append(start_state, reward_weights, traj)
 
     outdir.mkdir(parents=True, exist_ok=True)
 
