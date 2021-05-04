@@ -3,7 +3,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
-from driver.car import LegacyPlanCar, LegacyPlannerCar
+import tensorflow as tf
+from driver.car import LegacyPlanCar, LegacyPlannerCar, planner_car
 from driver.legacy.models import Driver  # type: ignore
 from driver.world import ThreeLaneCarWorld
 
@@ -57,8 +58,13 @@ def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int 
 class TrajOptimizer:
     """ Finds optimal trajectories in the Driver environment. """
 
-    def __init__(self, n_planner_iters: int):
+    def __init__(self, n_planner_iters: int, optim: Optional[tf.keras.optimizers.Optimizer] = None):
         self.world = ThreeLaneCarWorld()
+
+        planner_args = {"n_iter": n_planner_iters}
+        if optim is not None:
+            planner_args["optimizer"] = optim
+
         self.planner_car = LegacyPlannerCar(
             env=self.world,
             init_state=np.array([0.0, -0.3, np.pi / 2.0, 0.4], dtype=np.float32),
@@ -66,7 +72,7 @@ class TrajOptimizer:
             weights=np.ones(
                 4,
             ),
-            planner_args={"n_iter": n_planner_iters},
+            planner_args=planner_args,
         )
         self.other_car = LegacyPlanCar(env=self.world)
         self.world.add_cars([self.planner_car, self.other_car])

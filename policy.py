@@ -355,7 +355,7 @@ def compare(
         for replication, td3_path in zip(replication_indices, td3_paths):
             compare(
                 reward_path=Path(reward_path) / str(replication) / "true_reward.npy",
-                outdir=Path(outdir) / str(replication) / "comparison_plots",
+                outdir=Path(outdir) / str(replication),
                 td3_dir=td3_path,
                 planner_iters=planner_iters,
                 random_start=random_start,
@@ -390,8 +390,7 @@ def compare(
 
             return self.get()
 
-        def get(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-            assert self.states is not None and self.rewards is not None and self.trajs is not None
+        def get(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
             return self.states, self.rewards, self.trajs
 
     planner_bad = BadPlannerCollection()
@@ -427,18 +426,20 @@ def compare(
             planner_bad.append(start_state, reward_weights, traj)
 
     outdir.mkdir(parents=True, exist_ok=True)
+    plot_dir = outdir / "comparison_plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
 
     plt.hist(returns[:, 0], label="Empirical", alpha=0.5)
     plt.hist(returns[:, 1], label="Optimal", alpha=0.5)
     plt.title("Histogram of Optimal vs Empirical returns")
     plt.legend()
-    plt.savefig(outdir / "returns.png")
+    plt.savefig(plot_dir / "returns.png")
     plt.close()
 
     regret = returns[:, 1] - returns[:, 0]
     plt.hist(regret)
     plt.title("Histogram of regret")
-    plt.savefig(outdir / "regret.png")
+    plt.savefig(plot_dir / "regret.png")
     plt.close()
     logging.info(f"Average regret = {np.mean(regret)}, min={np.min(regret)}, max={np.max(regret)}")
 
