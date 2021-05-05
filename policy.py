@@ -381,14 +381,27 @@ def compare(
         ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
             if self.states is None:
                 self.states = np.array([state])
+                logging.debug(f"state shape={state.shape}, states shapes={self.states.shape}")
                 self.rewards = np.array([reward])
                 self.trajs = np.array([traj])
             else:
-                self.states = np.append(self.states, state)
-                self.rewards = np.append(self.rewards, reward)
-                self.trajs = np.append(self.trajs, traj)
+                self.states = np.append(self.states, [state], axis=0)
+                logging.debug(f"state shape={state.shape}, states shapes={self.states.shape}")
+                self.rewards = np.append(self.rewards, [reward], axis=0)
+                self.trajs = np.append(self.trajs, [traj], axis=0)
+
+            self.check_shapes()
 
             return self.get()
+
+        def check_shapes(self):
+            assert len(self.states.shape) == 3
+            assert len(self.rewards.shape) == 2
+            assert len(self.trajs.shape) == 3
+
+            assert self.states.shape[1:] == (2, 4)
+            assert self.rewards.shape[1] == 4
+            assert self.trajs.shape[1:] == (50, 2)
 
         def get(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
             return self.states, self.rewards, self.trajs
