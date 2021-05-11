@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
@@ -58,10 +58,20 @@ def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int 
 class TrajOptimizer:
     """ Finds optimal trajectories in the Driver environment. """
 
-    def __init__(self, n_planner_iters: int, optim: Optional[tf.keras.optimizers.Optimizer] = None):
+    def __init__(
+        self,
+        n_planner_iters: int,
+        optim: Optional[tf.keras.optimizers.Optimizer] = None,
+        init_controls: Optional[List[List[List[float]]]] = None,
+        log_best_init: bool = False,
+    ):
         self.world = ThreeLaneCarWorld()
 
-        planner_args = {"n_iter": n_planner_iters}
+        planner_args = {
+            "n_iter": n_planner_iters,
+            "init_controls": init_controls,
+            "log_best_init": log_best_init,
+        }
         if optim is not None:
             planner_args["optimizer"] = optim
 
