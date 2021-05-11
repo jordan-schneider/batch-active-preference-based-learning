@@ -1,7 +1,8 @@
 import logging
 import pickle as pkl
+import sys
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Literal, Optional, Tuple, Union
 
 import arrow
 import fire  # type: ignore
@@ -10,6 +11,27 @@ from numpy.linalg import norm
 from scipy.stats import multivariate_normal  # type: ignore
 
 from active.sampling import Sampler
+
+
+def setup_logging(
+    verbosity: Literal["INFO", "DEBUG"],
+    log_path: Optional[Path] = None,
+) -> None:
+    logging.basicConfig(
+        level=verbosity,
+        format="%(levelname)s:%(asctime)s:%(message)s",
+        filename=log_path,
+    )
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
+
+def shape_compat(arr: np.ndarray, shape: Tuple[int, ...]) -> bool:
+    if len(arr.shape) != len(shape):
+        return False
+    for i, j in zip(arr.shape, shape):
+        if j != -1 and i != j:
+            return False
+    return True
 
 
 def make_gaussian_rewards(
