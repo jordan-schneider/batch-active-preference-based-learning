@@ -17,12 +17,16 @@ def setup_logging(
     verbosity: Literal["INFO", "DEBUG"],
     log_path: Optional[Path] = None,
 ) -> None:
+    handlers = [logging.StreamHandler(sys.stdout)]
+    if log_path is not None:
+        handlers.append(logging.FileHandler(str(log_path), mode="w"))
+
     logging.basicConfig(
-        level=verbosity,
-        format="%(levelname)s:%(asctime)s:%(message)s",
-        filename=log_path,
+        level=verbosity, format="%(levelname)s:%(asctime)s:%(message)s", handlers=handlers
     )
-    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
+    mpl_logger = logging.getLogger("matplotlib")
+    mpl_logger.setLevel(logging.WARNING)
 
 
 def shape_compat(arr: np.ndarray, shape: Tuple[int, ...]) -> bool:

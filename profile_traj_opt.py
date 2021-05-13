@@ -2,7 +2,7 @@ import logging
 import pickle
 from pathlib import Path
 from time import perf_counter
-from typing import List, Literal, Optional, Sequence, Tuple, Union
+from typing import Literal, Optional, Sequence, Tuple, Union
 
 import fire  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
@@ -11,7 +11,7 @@ from driver.gym.legacy_env import LegacyEnv
 from tensorflow.keras.optimizers import SGD, Adam  # type: ignore
 
 from active.simulation_utils import TrajOptimizer
-from utils import parse_replications
+from utils import parse_replications, setup_logging
 
 
 def main(
@@ -29,7 +29,13 @@ def main(
     n_traj_max: Optional[int] = None,
     verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ):
-    logging.basicConfig(level=verbosity, format="%(levelname)s:%(asctime)s:%(message)s")
+    outdir = Path(outdir)
+    experiment_dir = outdir / make_experiment(
+        optim, lr, plan_iters, momentum, nesterov, extra_inits
+    )
+    experiment_dir.mkdir(parents=True, exist_ok=True)
+
+    setup_logging(verbosity=verbosity, log_path=experiment_dir / "log.txt")
 
     if replications is not None:
         replication_indices = parse_replications(replications)
@@ -39,12 +45,6 @@ def main(
         ]
     else:
         mistakes_paths = [Path(mistakes_path)]
-
-    outdir = Path(outdir)
-    experiment_dir = outdir / make_experiment(
-        optim, lr, plan_iters, momentum, nesterov, extra_inits
-    )
-    experiment_dir.mkdir(parents=True, exist_ok=True)
 
     if optim == "sgd":
         optimizer = SGD(learning_rate=lr, momentum=momentum, nesterov=nesterov)
@@ -58,19 +58,22 @@ def main(
     )
 
     init_controls = (
-        [
-            [[1.0, 0.0]] * 50,
-            [[-1.0, 0.0]] * 50,
-            [[1.0, -0.5]] * 50,
-            [[-1.0, -0.5]] * 50,
-            [[1.0, 0.5]] * 50,
-            [[1.0, -0.5]] * 50,
-        ]
+        np.array(
+            [
+                [[0.0, 1.0]] * 50,
+                [[0.0, -1.0]] * 50,
+                [[-0.5, -1.0]] * 50,
+                [[0.5, -1.0]] * 50,
+                [[0.5, 1.0]] * 50,
+                [[-0.5, 1.0]] * 50,
+            ]
+        )
         if extra_inits
         else None
     )
 
-    opt_trajs = make_opt_trajs(
+    logging.info("Making trajectories")
+    opt_trajs, losses = make_opt_trajs(
         traj_opt=TrajOptimizer(
             n_planner_iters=plan_iters,
             optim=optimizer,
@@ -82,20 +85,25 @@ def main(
         log_time=log_time,
     )
 
+    logging.info("Rolling out trajectories")
     returns = np.empty((len(starts), 2))
-    for i, (start, reward_weights, opt_traj, policy_traj) in enumerate(
-        zip(starts, rewards, opt_trajs, better_trajs)
+    for i, (start, reward_weights, opt_traj, policy_traj, loss) in enumerate(
+        zip(starts, rewards, opt_trajs, better_trajs, losses)
     ):
         env.reward = reward_weights
 
         traj_opt_return = rollout(actions=opt_traj, env=env, start=start)
         policy_return = rollout(actions=policy_traj, env=env, start=start)
 
+        assert (
+            abs(traj_opt_return + loss) < 0.001
+        ), f"Rollout={traj_opt_return} and loss={loss}, differ by too much. start={start}, reward={reward_weights}"
+
         returns[i, 0] = traj_opt_return
         returns[i, 1] = policy_return
 
         logging.debug(
-            f"Traj opt return={traj_opt_return}, policy_return={policy_return}, delta={traj_opt_return-policy_return}"
+            f"Traj opt return={traj_opt_return}, loss={loss}, policy_return={policy_return}, delta={traj_opt_return-policy_return}"
         )
 
     np.save(experiment_dir / "returns.npy", returns)
@@ -114,15 +122,17 @@ def make_opt_trajs(
     rewards: np.ndarray,
     starts: np.ndarray,
     log_time: bool = False,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, np.ndarray]:
     trajs = []
+    losses = []
     times = []
     for reward, start_state in zip(rewards, starts):
         start = perf_counter()
-        traj = traj_opt.make_opt_traj(reward, start_state)
+        traj, loss = traj_opt.make_opt_traj(reward, start_state, return_loss=True)
         stop = perf_counter()
 
         trajs.append(traj)
+        losses.append(loss)
 
         times.append(stop - start)
 
@@ -132,7 +142,7 @@ def make_opt_trajs(
 
     if log_time:
         logging.info(f"Mean traj opt time={np.mean(times)}")
-    return trajs_array
+    return trajs_array, np.array(losses)
 
 
 def collect_mistakes(
@@ -203,9 +213,12 @@ def plot_returns(returns: np.ndarray, outdir: Path):
 def rollout(actions: np.ndarray, env: LegacyEnv, start: np.ndarray) -> float:
     env.reset()
     env.state = start
+    state = start
     traj_return = 0.0
     for action in actions:
+        logging.debug(f"before state={state}")
         state, reward, done, info = env.step(action)
+        logging.debug(f"after state={state}, action={action}, reward={reward}")
         traj_return += reward
     return traj_return
 

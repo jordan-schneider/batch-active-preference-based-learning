@@ -1,11 +1,12 @@
 import logging
-from typing import List, Optional, Tuple
+from typing import Callable, Final, List, Optional, Tuple, Union
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
-import tensorflow as tf
-from driver.car import LegacyPlanCar, LegacyPlannerCar, planner_car
+import tensorflow as tf  # type: ignore
+from driver.car import LegacyPlanCar, LegacyRewardCar
 from driver.legacy.models import Driver  # type: ignore
+from driver.simulation_utils import legacy_car_dynamics_step_tf
 from driver.world import ThreeLaneCarWorld
 
 from active import algos
@@ -58,49 +59,120 @@ def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int 
 class TrajOptimizer:
     """ Finds optimal trajectories in the Driver environment. """
 
+    HORIZON: Final[int] = 50
+
     def __init__(
         self,
         n_planner_iters: int,
-        optim: Optional[tf.keras.optimizers.Optimizer] = None,
-        init_controls: Optional[List[List[List[float]]]] = None,
+        optim: tf.keras.optimizers.Optimizer = tf.keras.optimizers.SGD(0.1),
+        init_controls: Optional[np.ndarray] = None,
         log_best_init: bool = False,
     ):
         self.world = ThreeLaneCarWorld()
 
-        planner_args = {
-            "n_iter": n_planner_iters,
-            "init_controls": init_controls,
-            "log_best_init": log_best_init,
-        }
-        if optim is not None:
-            planner_args["optimizer"] = optim
+        self.optim = optim
+        self.n_opt_iters: Final[int] = n_planner_iters
 
-        self.planner_car = LegacyPlannerCar(
+        self.init_controls = np.array(
+            [
+                [[0.0, 0.0]] * self.HORIZON,
+                [[-5 * 0.13, 0]] * self.HORIZON,
+                [[5 * 0.13, 0]] * self.HORIZON,
+            ]
+        )
+        assert self.init_controls.shape == (3, self.HORIZON, 2)
+        if init_controls is not None:
+            self.init_controls = np.concatenate((self.init_controls, init_controls))
+
+        self.tf_controls = tf.Variable(np.zeros((self.HORIZON, 2)), dtype=tf.float32)
+
+        self.main_car = LegacyRewardCar(
             env=self.world,
             init_state=np.array([0.0, -0.3, np.pi / 2.0, 0.4], dtype=np.float32),
-            horizon=50,
-            weights=np.ones(
-                4,
-            ),
-            planner_args=planner_args,
+            weights=np.zeros(4),
         )
         self.other_car = LegacyPlanCar(env=self.world)
-        self.world.add_cars([self.planner_car, self.other_car])
+
+        self.log_best_init = log_best_init
+
+    def make_loss(self) -> Callable[[], tf.Tensor]:
+        other_actions = tf.constant(self.other_car.plan, dtype=tf.float32)
+
+        main_init = self.main_car.init_state
+        other_init = self.other_car.init_state
+
+        @tf.function
+        def loss() -> tf.Tensor:
+            sum_reward = 0.0
+
+            controls = tf.stack((self.tf_controls, other_actions), axis=1)
+
+            main_car_state = main_init
+            other_car_state = other_init
+
+            for control in controls:
+                main_control = control[0]
+                other_control = control[1]
+                # tf.print("state=", main_car_state, other_car_state)
+                # tf.print("action=", main_control)
+                assert main_control.shape == (2,)
+                main_car_state = legacy_car_dynamics_step_tf(main_car_state, main_control)
+
+                other_car_state = legacy_car_dynamics_step_tf(other_car_state, other_control)
+
+                # tf.print("after step state=", main_car_state)
+
+                reward = self.main_car.reward_fn(
+                    (main_car_state, other_car_state), None
+                )  # Action doesn't matter for reward
+
+                sum_reward += reward
+            return -sum_reward
+
+        return loss
 
     def make_opt_traj(
-        self, reward: np.ndarray, start_state: Optional[np.ndarray] = None
-    ) -> np.ndarray:
+        self,
+        reward: np.ndarray,
+        start_state: Optional[np.ndarray] = None,
+        return_loss: bool = False,
+    ) -> Union[np.ndarray, Tuple[np.ndarray, float]]:
         """ Finds the optimal sequence of actions under a given reward and starting state. """
         if start_state is not None:
             assert start_state.shape == (2, 4)
-            self.planner_car.init_state = start_state[0]
+            self.main_car.init_state = start_state[0]
             self.other_car.set_init_state(start_state[1])
 
-        self.planner_car.weights = reward
+        self.main_car.weights = reward
 
-        self.planner_car._get_next_control()
-        plan = np.array([action.numpy() for action in self.planner_car.plan])
-        return plan
+        loss = self.make_loss()
+
+        best_loss = float("inf")
+        best_init = -1
+        for i, init_control in enumerate(self.init_controls):
+            assert init_control.shape == (50, 2)
+            self.tf_controls.assign(init_control)
+
+            for _ in range(self.n_opt_iters):
+                self.optim.minimize(loss, self.tf_controls)
+
+            # TODO(joschnei): Figure out if this recomputation can be avoided. Or maybe the result
+            # is cached and this is free.
+            current_loss = loss()
+
+            if current_loss < best_loss:
+                best_loss = current_loss
+                best_plan = self.tf_controls.numpy()
+                best_init = i
+
+        assert i > 0
+
+        if self.log_best_init:
+            logging.info(f"Best traj found from init={best_init}")
+
+        if return_loss:
+            return best_plan, best_loss
+        return best_plan
 
 
 def get_simulated_feedback(
