@@ -7,10 +7,24 @@ from typing import Any, List, Literal, Optional, Tuple, Union
 import arrow
 import fire  # type: ignore
 import numpy as np
+from gym import Env
 from numpy.linalg import norm
 from scipy.stats import multivariate_normal  # type: ignore
 
 from active.sampling import Sampler
+
+
+def rollout(actions: np.ndarray, env: Env, start: np.ndarray) -> float:
+    env.reset()
+    env.state = start
+    state = start
+    traj_return = 0.0
+    for action in actions:
+        logging.debug(f"before state={state}")
+        state, reward, done, info = env.step(action)
+        logging.debug(f"after state={state}, action={action}, reward={reward}")
+        traj_return += reward
+    return traj_return
 
 
 def setup_logging(

@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Final, List, Optional, Tuple, Union
+from typing import Callable, Dict, Final, Optional, Tuple, Union
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
@@ -95,6 +95,8 @@ class TrajOptimizer:
 
         self.log_best_init = log_best_init
 
+        self.cache: Dict[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, float]] = {}
+
     def make_loss(self) -> Callable[[], tf.Tensor]:
         other_actions = tf.constant(self.other_car.plan, dtype=tf.float32)
 
@@ -136,12 +138,20 @@ class TrajOptimizer:
         reward: np.ndarray,
         start_state: Optional[np.ndarray] = None,
         return_loss: bool = False,
+        memorize: bool = False,
     ) -> Union[np.ndarray, Tuple[np.ndarray, float]]:
         """ Finds the optimal sequence of actions under a given reward and starting state. """
         if start_state is not None:
             assert start_state.shape == (2, 4)
             self.main_car.init_state = start_state[0]
             self.other_car.set_init_state(start_state[1])
+        else:
+            start_state = np.stack(
+                (self.main_car.init_state.numpy(), self.other_car.init_state.numpy())
+            )
+
+        if (reward.tobytes(), start_state.tobytes()) in self.cache.keys():
+            return self.cache[reward.tobytes(), start_state.tobytes()]
 
         self.main_car.weights = reward
 
@@ -162,13 +172,16 @@ class TrajOptimizer:
 
             if current_loss < best_loss:
                 best_loss = current_loss
-                best_plan = self.tf_controls.numpy()
+                best_plan: np.ndarray = self.tf_controls.numpy()
                 best_init = i
 
         assert i > 0
 
         if self.log_best_init:
             logging.info(f"Best traj found from init={best_init}")
+
+        if memorize:
+            self.cache[reward.tobytes(), start_state.tobytes()] = (best_plan, float(best_loss))
 
         if return_loss:
             return best_plan, best_loss

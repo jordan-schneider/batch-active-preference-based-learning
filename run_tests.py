@@ -21,8 +21,6 @@ from typing import (
 )
 
 import argh  # type: ignore
-import driver.gym
-import gym  # type: ignore
 import numpy as np
 import tensorflow as tf  # type: ignore
 from driver.gym.legacy_env import LegacyEnv
@@ -38,11 +36,9 @@ from driver.legacy.models import Driver
 from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
-from TD3 import Td3, load_td3  # type: ignore
 
 from active.simulation_utils import TrajOptimizer, assert_normals, make_normals, orient_normals
 from equiv_utils import add_equiv_constraints, remove_equiv
-from policy import make_td3_paths, make_TD3_state
 from random_baseline import make_random_questions
 from testing_factory import TestFactory
 from utils import (
@@ -53,6 +49,8 @@ from utils import (
     load,
     make_gaussian_rewards,
     parse_replications,
+    rollout,
+    shape_compat,
 )
 
 Experiment = Tuple[float, float, int]
@@ -65,12 +63,10 @@ Experiment = Tuple[float, float, int]
 def premake_test_rewards(
     epsilons: List[float] = [0.0],
     n_rewards: int = 100,
-    n_test_states: int = 1000,
+    n_test_states: Optional[int] = None,
     true_reward_name: Path = Path("true_reward.npy"),
-    flags_name: Path = Path("flags.pkl"),
     datadir: Path = Path(),
     outdir: Path = Path(),
-    model_dir: Path = Path(),
     use_equiv: bool = False,
     replications: Optional[Union[str, Tuple[int, ...]]] = None,
     n_cpus: int = 1,
@@ -81,9 +77,8 @@ def premake_test_rewards(
     logging.basicConfig(level=verbosity, format="%(levelname)s:%(asctime)s:%(message)s")
     if replications is not None:
         replication_indices = parse_replications(replications)
-        model_dirs = make_td3_paths(model_dir, replication_indices)
 
-        for replication, model_dir in zip(replication_indices, model_dirs):
+        for replication in replication_indices:
             if not (datadir / str(replication)).exists():
                 logging.warning(f"Replication {replication} does not exist, skipping")
                 continue
@@ -93,10 +88,8 @@ def premake_test_rewards(
                 n_rewards=n_rewards,
                 n_test_states=n_test_states,
                 true_reward_name=true_reward_name,
-                flags_name=flags_name,
                 datadir=datadir / str(replication),
                 outdir=outdir / str(replication),
-                model_dir=model_dir,
                 use_equiv=use_equiv,
                 n_cpus=n_cpus,
                 overwrite=overwrite,
@@ -114,7 +107,6 @@ def premake_test_rewards(
             true_reward=true_reward,
             n_rewards=n_rewards,
             n_test_states=n_test_states,
-            model_dir=model_dir,
             outdir=outdir,
             parallel=parallel,
             use_equiv=use_equiv,
@@ -139,7 +131,6 @@ def simulated(
     flags_name: Path = Path("flags.pkl"),
     datadir: Path = Path(),
     outdir: Path = Path(),
-    model_dir: Optional[Path] = None,
     use_equiv: bool = False,
     use_mean_reward: bool = False,
     use_random_test_questions: bool = False,
@@ -161,13 +152,7 @@ def simulated(
     if replications is not None:
         replication_indices = parse_replications(replications)
 
-        if legacy_test_rewards:
-            model_dirs: Sequence[Optional[Path]] = [None] * len(replication_indices)
-        else:
-            assert model_dir is not None
-            model_dirs = make_td3_paths(model_dir, replication_indices)
-
-        for replication, model_dir in zip(replication_indices, model_dirs):
+        for replication in zip(replication_indices):
             if not (datadir / str(replication)).exists():
                 logging.warning(f"Replication {replication} does not exist, skipping")
                 continue
@@ -188,7 +173,6 @@ def simulated(
                 flags_name=flags_name,
                 datadir=datadir / str(replication),
                 outdir=outdir / str(replication),
-                model_dir=model_dir,
                 use_equiv=use_equiv,
                 use_mean_reward=use_mean_reward,
                 use_random_test_questions=use_random_test_questions,
@@ -292,13 +276,11 @@ def simulated(
         )
 
     if not legacy_test_rewards:
-        assert model_dir is not None
         test_rewards = make_test_rewards(
             epsilons=epsilons,
             true_reward=true_reward,
             n_rewards=n_rewards,
             n_test_states=n_test_states,
-            model_dir=model_dir,
             outdir=outdir,
             parallel=parallel,
             use_equiv=use_equiv,
@@ -451,7 +433,6 @@ def compare_test_labels(
     elicitation: bool = False,
     replications: Optional[str] = None,
     normals_path: Optional[Path] = None,
-    td3_dir: Optional[Path] = None,
 ):
     if replications is not None:
         raise NotImplementedError("Replications not yet implemented")
@@ -480,16 +461,14 @@ def compare_test_labels(
                 rewards=rewards, q_labels=q_labels, elicitation_labels=elicitation_labels
             )
     elif elicitation:
-        assert td3_dir is not None
         parallel = Parallel(n_cpus=-4)
         env = LegacyEnv(reward=true_reward, random_start=True)
-        td3 = load_td3(env=env, filename=td3_dir)
         traj_optimizer = TrajOptimizer(10)
         for epsilon, (rewards, elicitation_labels) in starting_tests.items():
             q_labels = rewards_aligned(
-                td3=td3,
                 traj_optimizer=traj_optimizer,
                 env=env,
+                true_reward=true_reward,
                 test_rewards=rewards,
                 epsilon=epsilon,
                 parallel=parallel,
@@ -517,23 +496,15 @@ def make_test_rewards(
     epsilons: Sequence[float],
     true_reward: np.ndarray,
     n_rewards: int,
-    n_test_states: int,
-    model_dir: Path,
     outdir: Path,
     parallel: Parallel,
+    n_test_states: Optional[int] = None,
     max_attempts: int = 10,
     use_equiv: bool = False,
     overwrite: bool = False,
 ) -> Dict[float, Tuple[np.ndarray, np.ndarray]]:
     """ Makes test rewards sets for every epsilon and saves them to a file. """
-    env = gym.make(
-        "LegacyDriver-v1",
-        reward=np.zeros(
-            4,
-        ),
-    )
-    model = load_td3(env, model_dir)
-    traj_optimizer = TrajOptimizer(n_planner_iters=10)
+    traj_optimizer = TrajOptimizer(n_planner_iters=100, optim=tf.keras.optimizers.Adam(0.2))
 
     reward_path = outdir / "test_rewards.pkl"
 
@@ -550,11 +521,29 @@ def make_test_rewards(
     if new_epsilons:
         logging.info(f"Creating new test rewards for epsilons: {new_epsilons}")
 
-    test_rewards.update(
-        {
-            epsilon: find_reward_boundary(
+    if n_test_states is not None and n_test_states > 1:
+        # Parallelize internally
+        test_rewards.update(
+            {
+                epsilon: find_reward_boundary(
+                    true_reward=true_reward,
+                    traj_optimizer=traj_optimizer,
+                    n_rewards=n_rewards,
+                    use_equiv=use_equiv,
+                    epsilon=epsilon,
+                    n_samples=n_test_states,
+                    max_attempts=max_attempts,
+                    outdir=outdir,
+                    overwrite=overwrite,
+                    parallel=parallel,
+                )
+                for epsilon in new_epsilons
+            }
+        )
+    else:
+        for rewards, alignment, epsilon in parallel(
+            delayed(find_reward_boundary)(
                 true_reward=true_reward,
-                td3=model,
                 traj_optimizer=traj_optimizer,
                 n_rewards=n_rewards,
                 use_equiv=use_equiv,
@@ -563,39 +552,43 @@ def make_test_rewards(
                 max_attempts=max_attempts,
                 outdir=outdir,
                 overwrite=overwrite,
-                parallel=parallel,
+                parallel=None,
+                return_epsilon=True,
             )
-            for epsilon in new_epsilons
-        }
-    )
+            for epsilon in epsilons
+        ):
+            test_rewards[epsilon] = (rewards, alignment)
+
     pickle.dump(test_rewards, open(reward_path, "wb"))
-    del model  # Manually free GPU memory allocation, just in case
     return test_rewards
 
 
 def find_reward_boundary(
     true_reward: np.ndarray,
-    td3: Td3,
     traj_optimizer: TrajOptimizer,
     n_rewards: int,
     use_equiv: bool,
     epsilon: float,
-    n_samples: int,
     max_attempts: int,
     outdir: Path,
     parallel: Parallel,
+    n_samples: Optional[int] = None,
     overwrite: bool = False,
-) -> Tuple[np.ndarray, np.ndarray]:
+    return_epsilon: bool = False,
+) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray, float]]:
     """ Finds a ballanced set of test rewards according to a critic and epsilon. """
-    env = gym.make("LegacyDriver-v1", reward=true_reward)
+    env = LegacyEnv(reward=true_reward)
+
+    # Don't parallelize here if we're only testing at one state
+    parallel = parallel if n_samples is None else None
 
     new_rewards = partial(
         make_gaussian_rewards, n_rewards=n_rewards, use_equiv=use_equiv, mean=true_reward
     )
     get_alignment = partial(
         rewards_aligned,
-        td3=td3,
         traj_optimizer=traj_optimizer,
+        true_reward=true_reward,
         env=env,
         epsilon=epsilon,
         parallel=parallel,
@@ -618,69 +611,80 @@ def find_reward_boundary(
 
     best_test = search.run()
 
+    if return_epsilon:
+        return best_test.rewards, best_test.alignment, epsilon
+
     return best_test.rewards, best_test.alignment
 
 
 def rewards_aligned(
-    td3: Td3,
     traj_optimizer: TrajOptimizer,
     env: Env,
+    true_reward: np.ndarray,
     test_rewards: np.ndarray,
     epsilon: float,
-    parallel: Parallel,
-    n_test_states: int = int(1e4),
+    parallel: Optional[Parallel] = None,
+    n_test_states: Optional[int] = None,
 ) -> np.ndarray:
     """ Determines the epsilon-alignment of a set of test rewards relative to a critic and epsilon. """
     with torch.no_grad():
-        logging.debug("Finding reward alignment")
         state_shape = env.observation_space.sample().shape
         action_shape = env.action_space.sample().shape
-        n_rewards = len(test_rewards)
 
-        raw_states = np.array(
-            [
-                flatten(env.observation_space, env.observation_space.sample())
-                for _ in range(n_test_states)
-            ]
-        )
+        if n_test_states is not None:
+            raw_states = np.array(
+                [
+                    flatten(env.observation_space, env.observation_space.sample())
+                    for _ in range(n_test_states)
+                ]
+            )
+        else:
+            n_test_states = 1
+            raw_states = np.array([env.state])
         assert raw_states.shape == (n_test_states, *state_shape)
-        reward_features = env.features(raw_states).numpy()
-        states = make_TD3_state(raw_states, reward_features)
-        opt_actions = td3.select_action(states)
-        opt_values: np.ndarray = (
-            td3.critic.Q1(states, opt_actions).reshape(n_test_states).cpu().numpy()
+
+        opt_plans = make_plans(
+            true_reward.reshape(1, 4),
+            raw_states,
+            traj_optimizer,
+            parallel,
+            action_shape,
+            memorize=True,
         )
-
-        logging.debug("Opt actions and values found.")
-
-        reward_feature_shape = reward_features[0].shape
-
-        assert states.shape == (
+        assert opt_plans.shape == (
+            1,
             n_test_states,
-            np.prod(state_shape) + np.prod(reward_feature_shape),
-        ), f"States shape={states.shape}"
-        assert opt_actions.shape == (
-            n_test_states,
+            50,
             *action_shape,
-        ), f"Actions shape={opt_actions.shape}, expected={(n_test_states, *action_shape)}"
+        ), f"opt_plans shape={opt_plans.shape} is not expected {(1,n_test_states,50,*action_shape)}"
+        opt_values: np.ndarray = rollout_plans(env, opt_plans, raw_states)
 
-        actions = get_opt_actions(test_rewards, raw_states, traj_optimizer, parallel, action_shape)
-
-        logging.debug("opt actions found, getting values")
-
-        values: np.ndarray = (
-            td3.critic.Q1(np.tile(states, (n_rewards, 1, 1)), actions)
-            .reshape(n_rewards, n_test_states)
-            .cpu()
-            .numpy()
-        )
-
-        logging.debug("Values done.")
+        plans = make_plans(test_rewards, raw_states, traj_optimizer, parallel, action_shape)
+        assert plans.shape == (
+            len(test_rewards),
+            n_test_states,
+            50,
+            *action_shape,
+        ), f"plans shape={plans.shape} is not expected {(len(test_rewards),n_test_states,50,*action_shape)}"
+        values = rollout_plans(env, plans, raw_states)
+        assert values.shape == (
+            len(test_rewards),
+            n_test_states,
+        ), f"Values shape={values.shape} is not expected {(len(test_rewards), n_test_states)}"
 
         alignment = cast(np.ndarray, np.all(opt_values - values < epsilon, axis=1))
-
-        logging.debug("Alignment done")
     return alignment
+
+
+def rollout_plans(env: LegacyEnv, plans: np.ndarray, states: np.ndarray):
+    returns = np.empty((plans.shape[0], plans.shape[1]))
+    assert len(returns.shape) == 2
+
+    assert len(plans.shape) == 4
+    for i in range(plans.shape[0]):
+        for j in range(plans.shape[1]):
+            returns[i, j] = rollout(plans[i, j], env, states[j])
+    return returns
 
 
 def legacy_make_test_rewards(
@@ -731,29 +735,45 @@ def legacy_make_test_rewards(
     return test_rewards
 
 
-def get_opt_actions(
+def make_plans(
     rewards: np.ndarray,
     states: np.ndarray,
     optim: TrajOptimizer,
-    parallel: Parallel,
+    parallel: Optional[Parallel] = None,
     action_shape: Tuple[int, ...] = (2,),
+    memorize: bool = False,
 ) -> np.ndarray:
 
-    input_batches = np.array_split(list(product(rewards, states)), parallel.n_jobs)
+    assert shape_compat(
+        rewards, (-1, 4)
+    ), f"rewards shape={rewards.shape} is wrong, expected (-1, 4)"
 
-    logging.debug("Branching")
+    if parallel:
+        input_batches = np.array_split(list(product(rewards, states)), parallel.n_jobs)
 
-    return np.concatenate(
-        parallel(
-            delayed(align_worker)(
-                rewards=batch[:, 0],
-                states=batch[:, 1],
-                optim=optim,
-                action_shape=action_shape,
+        logging.debug("Branching")
+
+        return np.concatenate(
+            parallel(
+                delayed(align_worker)(
+                    rewards=batch[:, 0],
+                    states=batch[:, 1],
+                    optim=optim,
+                    action_shape=action_shape,
+                )
+                for batch in input_batches
             )
-            for batch in input_batches
-        )
-    ).reshape(len(rewards), len(states), *action_shape)
+        ).reshape(len(rewards), len(states), 50, *action_shape)
+    else:
+        plans = np.empty((len(rewards), len(states), 50, *action_shape))
+        for i, reward in enumerate(rewards):
+            assert reward.shape == (4,)
+            for j, state in enumerate(states):
+                path = optim.make_opt_traj(reward, state, memorize=memorize).reshape(
+                    -1, *action_shape
+                )
+                plans[i, j] = path
+        return plans
 
 
 def align_worker(
@@ -764,13 +784,11 @@ def align_worker(
 ):
     batch_size = rewards.shape[0]
     assert states.shape[0] == batch_size
-    opt_actions = np.empty((batch_size, *action_shape))
+    plans = np.empty((batch_size, 50, *action_shape))
     for i, (reward, state) in enumerate(zip(rewards, states)):
+        plans[i] = optim.make_opt_traj(reward, state).reshape(-1, *action_shape)
 
-        path = optim.make_opt_traj(reward, state).reshape(-1, *action_shape)
-        opt_actions[i] = path[0]
-
-    return opt_actions
+    return plans
 
 
 # Simulated Experiment
