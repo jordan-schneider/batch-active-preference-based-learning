@@ -152,7 +152,7 @@ def simulated(
     if replications is not None:
         replication_indices = parse_replications(replications)
 
-        for replication in zip(replication_indices):
+        for replication in replication_indices:
             if not (datadir / str(replication)).exists():
                 logging.warning(f"Replication {replication} does not exist, skipping")
                 continue
