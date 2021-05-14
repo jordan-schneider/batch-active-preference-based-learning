@@ -666,9 +666,9 @@ def make_gt_test_align(
     true_reward: np.ndarray,
     epsilon: float,
     use_equiv: bool = False,
-):
+) -> np.ndarray:
     trajs = make_random_questions(n_questions, Driver())
-    normals = make_normals(trajs, Driver(), use_equiv)
+    _, normals = make_normals(trajs, Driver(), use_equiv)
     gt_pref = true_reward @ normals.T > 0
     normals = orient_normals(normals, gt_pref, use_equiv)
     normals = normals[true_reward @ normals.T > epsilon]
