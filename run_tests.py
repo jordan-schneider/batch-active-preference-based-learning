@@ -542,7 +542,7 @@ def make_test_rewards(
                     outdir=outdir,
                     overwrite=overwrite,
                     parallel=parallel,
-                )
+                )[:2]
                 for epsilon in new_epsilons
             }
         )
@@ -580,8 +580,7 @@ def find_reward_boundary(
     parallel: Parallel,
     n_samples: Optional[int] = None,
     overwrite: bool = False,
-    return_epsilon: bool = False,
-) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray, float]]:
+) -> Tuple[np.ndarray, np.ndarray, float]:
     """ Finds a ballanced set of test rewards according to a critic and epsilon. """
     env = LegacyEnv(reward=true_reward)
 
@@ -617,10 +616,7 @@ def find_reward_boundary(
 
     best_test = search.run()
 
-    if return_epsilon:
-        return best_test.rewards, best_test.alignment, epsilon
-
-    return best_test.rewards, best_test.alignment
+    return best_test.rewards, best_test.alignment, epsilon
 
 
 def rewards_aligned(
@@ -673,7 +669,7 @@ def make_gt_test_align(
     normals = orient_normals(normals, gt_pref, use_equiv)
     normals = normals[true_reward @ normals.T > epsilon]
 
-    alignment = np.all(test_rewards @ normals.T > 0, axis=1)
+    alignment = cast(np.ndarray, np.all(test_rewards @ normals.T > 0, axis=1))
     assert alignment.shape == (test_rewards.shape[0], normals.shape[0])
     return alignment
 
@@ -834,10 +830,8 @@ def make_plans(
         for i, reward in enumerate(rewards):
             assert reward.shape == (4,)
             for j, state in enumerate(states):
-                path = optim.make_opt_traj(reward, state, memorize=memorize).reshape(
-                    -1, *action_shape
-                )
-                plans[i, j] = path
+                traj, _ = optim.make_opt_traj(reward, state, memorize=memorize)
+                plans[i, j] = traj.reshape(-1, *action_shape)
         return plans
 
 
@@ -851,7 +845,8 @@ def align_worker(
     assert states.shape[0] == batch_size
     plans = np.empty((batch_size, 50, *action_shape))
     for i, (reward, state) in enumerate(zip(rewards, states)):
-        plans[i] = optim.make_opt_traj(reward, state).reshape(-1, *action_shape)
+        traj, _ = optim.make_opt_traj(reward, state)
+        plans[i] = traj.reshape(-1, *action_shape)
 
     return plans
 

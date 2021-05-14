@@ -95,7 +95,7 @@ class TrajOptimizer:
 
         self.log_best_init = log_best_init
 
-        self.cache: Dict[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, float]] = {}
+        self.cache: Dict[Tuple[bytes, bytes], Tuple[np.ndarray, float]] = {}
 
     def make_loss(self) -> Callable[[], tf.Tensor]:
         other_actions = tf.constant(self.other_car.plan, dtype=tf.float32)
@@ -137,9 +137,8 @@ class TrajOptimizer:
         self,
         reward: np.ndarray,
         start_state: Optional[np.ndarray] = None,
-        return_loss: bool = False,
         memorize: bool = False,
-    ) -> Union[np.ndarray, Tuple[np.ndarray, float]]:
+    ) -> Tuple[np.ndarray, float]:
         """ Finds the optimal sequence of actions under a given reward and starting state. """
         if start_state is not None:
             assert start_state.shape == (2, 4)
@@ -183,9 +182,7 @@ class TrajOptimizer:
         if memorize:
             self.cache[reward.tobytes(), start_state.tobytes()] = (best_plan, float(best_loss))
 
-        if return_loss:
-            return best_plan, best_loss
-        return best_plan
+        return best_plan, best_loss
 
 
 def get_simulated_feedback(
