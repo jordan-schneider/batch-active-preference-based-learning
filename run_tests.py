@@ -123,7 +123,7 @@ def simulated(
     n_rewards: int = 100,
     human_samples: List[int] = [1],
     n_reward_samples: int = 1000,
-    n_test_states: int = 1000,
+    n_test_states: Optional[int] = None,
     input_features_name: Path = Path("input_features.npy"),
     normals_name: Path = Path("normals.npy"),
     preferences_name: Path = Path("preferences.npy"),
@@ -134,6 +134,7 @@ def simulated(
     use_equiv: bool = False,
     use_mean_reward: bool = False,
     use_random_test_questions: bool = False,
+    use_cheating_questions: bool = False,
     n_random_test_questions: Optional[int] = None,
     skip_remove_duplicates: bool = False,
     skip_noise_filtering: bool = False,
@@ -176,6 +177,7 @@ def simulated(
                 use_equiv=use_equiv,
                 use_mean_reward=use_mean_reward,
                 use_random_test_questions=use_random_test_questions,
+                use_cheating_questions=use_cheating_questions,
                 n_random_test_questions=n_random_test_questions,
                 skip_remove_duplicates=skip_remove_duplicates,
                 skip_noise_filtering=skip_noise_filtering,
@@ -263,9 +265,15 @@ def simulated(
             use_equiv=use_equiv,
         )
 
-        logging.info(
-            f"{np.mean((true_reward @ normals.T) > 0)*100:2f}% of new test questions agree with gt reward."
-        )
+        good_indices = (true_reward @ normals.T) > 0
+
+        logging.info(f"{np.mean(good_indices)*100:2f}% of new test questions agree with gt reward.")
+
+        if use_cheating_questions:
+            logging.info(f"Selecting only questions consistent with gt reward")
+            normals = normals[good_indices]
+            preferences = preferences[good_indices]
+            input_features = input_features[good_indices]
 
         assert_normals(normals, use_equiv)
     else:
@@ -287,9 +295,7 @@ def simulated(
             overwrite=overwrite_test_rewards,
         )
     else:
-        test_rewards = legacy_make_test_rewards(
-            normals, n_rewards, true_reward, epsilons, use_equiv
-        )
+        test_rewards = legacy_make_test_rewards(1000, n_rewards, true_reward, epsilons, use_equiv)
 
     for indices, confusion, experiment in parallel(
         delayed(run_gt_experiment)(
@@ -429,7 +435,7 @@ def human(
 def compare_test_labels(
     test_rewards_path: Path,
     true_reward_path: Path,
-    q: bool = False,
+    traj_opt: bool = False,
     elicitation: bool = False,
     replications: Optional[str] = None,
     normals_path: Optional[Path] = None,
@@ -441,7 +447,7 @@ def compare_test_labels(
         open(test_rewards_path, "rb")
     )
 
-    assert not (q == elicitation), "Provided labels must come from exactly one source"
+    assert not (traj_opt == elicitation), "Provided labels must come from exactly one source"
 
     class Test(NamedTuple):
         rewards: np.ndarray
@@ -450,7 +456,7 @@ def compare_test_labels(
 
     test_rewards: Dict[float, Test] = {}
     true_reward = np.load(true_reward_path)
-    if q:
+    if traj_opt:
         normals = np.load(normals_path)
 
         for epsilon, (rewards, q_labels) in starting_tests.items():
@@ -518,7 +524,7 @@ def make_test_rewards(
 
     new_epsilons = set(epsilons) - test_rewards.keys()
 
-    if new_epsilons:
+    if len(new_epsilons) > 0:
         logging.info(f"Creating new test rewards for epsilons: {new_epsilons}")
 
     if n_test_states is not None and n_test_states > 1:
@@ -555,7 +561,7 @@ def make_test_rewards(
                 parallel=None,
                 return_epsilon=True,
             )
-            for epsilon in epsilons
+            for epsilon in new_epsilons
         ):
             test_rewards[epsilon] = (rewards, alignment)
 
@@ -625,8 +631,62 @@ def rewards_aligned(
     epsilon: float,
     parallel: Optional[Parallel] = None,
     n_test_states: Optional[int] = None,
+    n_questions=1000,
+    use_equiv: bool = False,
 ) -> np.ndarray:
     """ Determines the epsilon-alignment of a set of test rewards relative to a critic and epsilon. """
+    # This test can produce both false positives and false negatives
+    traj_opt_alignment = make_traj_opt_align(
+        traj_optimizer, env, true_reward, test_rewards, epsilon, parallel, n_test_states
+    )
+
+    # This test is prone to false positives, but a negative is always a true negative
+    random_test_alignment = make_gt_test_align(
+        test_rewards, n_questions, true_reward, epsilon, use_equiv
+    )
+
+    # Start with traj opt alignment, then mask out all of the rewards that failed the gt test
+    # x y z
+    # 0 0 0
+    # 0 1 0 don't trust y when it says something is aligned if you failed the traj opt
+    # 1 0 0 if y says it's misaligned, then it is
+    # 1 1 1
+    # This is just the & function
+    alignment = traj_opt_alignment & random_test_alignment
+
+    n_masked = np.sum(make_traj_opt_align & np.logical_not(random_test_alignment))
+    logging.info(f"Trajectory optimization labelling produced at least {n_masked} false positives")
+
+    return alignment
+
+
+def make_gt_test_align(
+    test_rewards: np.ndarray,
+    n_questions: int,
+    true_reward: np.ndarray,
+    epsilon: float,
+    use_equiv: bool = False,
+):
+    trajs = make_random_questions(n_questions, Driver())
+    normals = make_normals(trajs, Driver(), use_equiv)
+    gt_pref = true_reward @ normals.T > 0
+    normals = orient_normals(normals, gt_pref, use_equiv)
+    normals = normals[true_reward @ normals.T > epsilon]
+
+    alignment = np.all(test_rewards @ normals.T > 0, axis=1)
+    assert alignment.shape == (test_rewards.shape[0], normals.shape[0])
+    return alignment
+
+
+def make_traj_opt_align(
+    traj_optimizer: TrajOptimizer,
+    env: Env,
+    true_reward: np.ndarray,
+    test_rewards: np.ndarray,
+    epsilon: float,
+    parallel: Optional[Parallel] = None,
+    n_test_states: Optional[int] = None,
+) -> np.ndarray:
     with torch.no_grad():
         state_shape = env.observation_space.sample().shape
         action_shape = env.action_space.sample().shape
@@ -688,16 +748,21 @@ def rollout_plans(env: LegacyEnv, plans: np.ndarray, states: np.ndarray):
 
 
 def legacy_make_test_rewards(
-    normals: np.ndarray,
+    n_questions: int,
     n_rewards: int,
     true_reward: np.ndarray,
     epsilons: List[float],
     use_equiv: bool,
 ) -> Dict[float, Tuple[np.ndarray, np.ndarray]]:
     """ Generates n_rewards reward vectors and determines which are aligned. """
-    assert_normals(normals, use_equiv)
     assert n_rewards > 0
     assert_reward(true_reward, use_equiv)
+
+    trajs = make_random_questions(n_questions, Driver())
+    normals = make_normals(trajs, Driver(), use_equiv)
+    gt_pref = true_reward @ normals.T > 0
+    normals = orient_normals(normals, gt_pref, use_equiv)
+    assert_normals(normals, use_equiv)
 
     n_reward_features = normals.shape[1]
 
