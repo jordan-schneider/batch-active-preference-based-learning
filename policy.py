@@ -4,11 +4,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
-import driver.gym  # type: ignore
+import driver.gym_env  # type: ignore
 import fire  # type: ignore
 import gym  # type: ignore
 import numpy as np
-from driver.gym.legacy_env import LegacyEnv
+from driver.gym_env.legacy_env import LegacyEnv
 from gym.spaces import Discrete  # type: ignore
 from gym.spaces import Tuple as GymTuple
 from gym.spaces import flatdim

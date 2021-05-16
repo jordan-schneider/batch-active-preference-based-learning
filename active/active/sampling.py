@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 import numpy as np
 
@@ -70,12 +70,12 @@ class Sampler:
 
     def sample_given_delta(
         self,
-        sample_count,
-        query_type,
+        sample_count: int,
+        query_type: Literal["strict", "weak"],
         delta: Optional[float] = None,
-        burn=1000,
-        thin=50,
-        step_size=0.1,
+        burn: int = 1000,
+        thin: int = 50,
+        step_size: float = 0.1,
     ):
         assert query_type in ["strict", "weak"], "There is no query type called " + query_type
         if query_type == "strict":

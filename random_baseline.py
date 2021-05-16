@@ -1,7 +1,7 @@
 import logging
 import pickle
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import fire  # type: ignore
 import numpy as np
@@ -45,8 +45,7 @@ def make_random_questions(n_questions: int, simulation_object) -> np.ndarray:
 
 
 def main(
-    task: str,
-    query_type: str,
+    query_type: Literal["strict", "weak"],
     n_questions: int,
     equiv_size: float = 1.1,
     reward_iterations: int = 100,
@@ -65,11 +64,9 @@ def main(
         reward_dir, reward_name = make_reward_path(reward_path)
         reward_path = reward_dir / reward_name
 
-    # TODO(joschnei): I could efficiently parallelize this.
     if n_replications is not None:
         Parallel(n_jobs=-2)(
             delayed(main)(
-                task=task,
                 query_type=query_type,
                 n_questions=n_questions,
                 equiv_size=equiv_size,
@@ -88,7 +85,7 @@ def main(
     if not human:
         assert reward_path is not None
         if not reward_path.exists():
-            logging.info("Reward path given does not exist, generating random reward.")
+            logging.warning("Reward path given does not exist, generating random reward.")
             true_reward = np.random.default_rng().normal(loc=0, scale=1, size=(4,))
             true_reward = true_reward / norm(true_reward)
             np.save(reward_path, true_reward)
@@ -97,7 +94,6 @@ def main(
 
     pickle.dump(
         {
-            "task": task,
             "query_type": query_type,
             "n_questions": n_questions,
             "equiv_size": equiv_size,
@@ -111,7 +107,7 @@ def main(
     inputs = load(outpath / "inputs.npy", overwrite=overwrite)
     input_features = load(outpath / "input_features.npy", overwrite=overwrite)
 
-    simulation_object = Driver()
+    env = Driver()
 
     if (
         inputs is not None
@@ -122,10 +118,10 @@ def main(
         input_A, input_B = inputs[-1]
 
         if human:
-            phi_A, phi_B, preference = get_feedback(simulation_object, input_A, input_B, query_type)
+            phi_A, phi_B, preference = get_feedback(env, input_A, input_B, query_type)
         else:
             phi_A, phi_B, preference = get_simulated_feedback(
-                simulation_object, input_A, input_B, query_type, true_reward, equiv_size
+                env, input_A, input_B, query_type, true_reward, equiv_size
             )
 
         input_features, normals, preferences = update_response(
@@ -134,9 +130,7 @@ def main(
 
     # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
     new_questions = n_questions - inputs.shape[0] if inputs is not None else n_questions
-    questions = make_random_questions(
-        n_questions=new_questions, simulation_object=simulation_object
-    )
+    questions = make_random_questions(n_questions=new_questions, simulation_object=env)
 
     if inputs is not None:
         assert input_features is not None
@@ -153,10 +147,10 @@ def main(
             logging.info(f"{inputs.shape[0]} of {n_questions}")
 
         if human:
-            phi_A, phi_B, preference = get_feedback(simulation_object, input_A, input_B, query_type)
+            phi_A, phi_B, preference = get_feedback(env, input_A, input_B, query_type)
         else:
             phi_A, phi_B, preference = get_simulated_feedback(
-                simulation_object, input_A, input_B, query_type, true_reward, equiv_size
+                env, input_A, input_B, query_type, true_reward, equiv_size
             )
 
         input_features, normals, preferences = update_response(
@@ -166,7 +160,7 @@ def main(
     save_reward(
         query_type=query_type,
         true_delta=equiv_size,
-        w_sampler=Sampler(simulation_object.num_of_features),
+        w_sampler=Sampler(env.num_of_features),
         n_reward_samples=reward_iterations,
         outdir=outpath,
     )

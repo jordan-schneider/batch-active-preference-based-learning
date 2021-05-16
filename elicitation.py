@@ -2,7 +2,7 @@ import logging
 import pickle
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import fire  # type: ignore
 import numpy as np
@@ -33,8 +33,8 @@ def setup(criterion: str, query_type: str, outdir: Path, delta: Optional[float] 
 
 
 def simulated(
-    criterion: str,
-    query_type: str,
+    criterion: Literal["information", "volume", "random"],
+    query_type: Literal["strict", "weak"],
     termination_threshold: float,
     n_reward_samples: int,
     equiv_size: Optional[float] = None,

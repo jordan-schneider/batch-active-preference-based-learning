@@ -23,14 +23,13 @@ from typing import (
 import argh  # type: ignore
 import numpy as np
 import tensorflow as tf  # type: ignore
-from driver.gym.legacy_env import LegacyEnv
+from driver.gym_env.legacy_env import LegacyEnv
 from gym.spaces import flatten  # type: ignore
 
 from search import GeometricSearch, TestRewardSearch
 
 tf.config.set_visible_devices([], "GPU")  # Car simulation stuff is faster on cpu
 
-import torch  # type: ignore
 from argh import arg
 from driver.legacy.models import Driver
 from gym.core import Env  # type: ignore
@@ -50,6 +49,7 @@ from utils import (
     make_gaussian_rewards,
     parse_replications,
     rollout,
+    setup_logging,
     shape_compat,
 )
 
@@ -74,7 +74,9 @@ def premake_test_rewards(
     verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ):
     """ Finds test rewards for each experiment. """
-    logging.basicConfig(level=verbosity, format="%(levelname)s:%(asctime)s:%(message)s")
+    outdir.mkdir(parents=True, exist_ok=True)
+    setup_logging(verbosity, log_path=outdir / "log.txt")
+
     if replications is not None:
         replication_indices = parse_replications(replications)
 
@@ -96,8 +98,6 @@ def premake_test_rewards(
             )
             logging.info(f"Done with replication {replication}")
         exit()
-
-    outdir.mkdir(parents=True, exist_ok=True)
 
     true_reward = np.load(datadir / true_reward_name)
     assert_reward(true_reward, False, 4)
@@ -586,7 +586,7 @@ def find_reward_boundary(
     env = LegacyEnv(reward=true_reward)
 
     # Don't parallelize here if we're only testing at one state
-    parallel = parallel if n_samples is None else None
+    parallel = parallel if n_samples is None or n_samples <= 1 else None
 
     new_rewards = partial(
         make_gaussian_rewards, n_rewards=n_rewards, use_equiv=use_equiv, mean=true_reward
@@ -594,8 +594,8 @@ def find_reward_boundary(
     get_alignment = partial(
         rewards_aligned,
         traj_optimizer=traj_optimizer,
-        true_reward=true_reward,
         env=env,
+        true_reward=true_reward,
         epsilon=epsilon,
         parallel=parallel,
         n_test_states=n_samples,
@@ -628,7 +628,7 @@ def rewards_aligned(
     epsilon: float,
     parallel: Optional[Parallel] = None,
     n_test_states: Optional[int] = None,
-    n_questions=1000,
+    n_questions: int = 100000,
     use_equiv: bool = False,
 ) -> np.ndarray:
     """ Determines the epsilon-alignment of a set of test rewards relative to a critic and epsilon. """
@@ -638,7 +638,7 @@ def rewards_aligned(
     )
 
     # This test is prone to false positives, but a negative is always a true negative
-    gt_test = make_gt_test_align(test_rewards, n_questions, true_reward, epsilon, use_equiv)
+    gt_test = make_gt_test_align(test_rewards, env, n_questions, true_reward, epsilon, use_equiv)
 
     # Start with traj opt alignment, then mask out all of the rewards that failed the gt test
     # x y z
@@ -657,16 +657,21 @@ def rewards_aligned(
 
 def make_gt_test_align(
     test_rewards: np.ndarray,
+    env: Driver,
     n_questions: int,
     true_reward: np.ndarray,
     epsilon: float,
     use_equiv: bool = False,
 ) -> np.ndarray:
-    trajs = make_random_questions(n_questions, Driver())
-    _, normals = make_normals(trajs, Driver(), use_equiv)
-    gt_pref = true_reward @ normals.T > 0
+    trajs = make_random_questions(n_questions, env)
+    _, normals = make_normals(trajs, env, use_equiv)
+
+    value_diff = true_reward @ normals.T
+    eps_questions = np.abs(value_diff) > epsilon
+    normals = normals[eps_questions]
+
+    gt_pref = value_diff[eps_questions] > 0
     normals = orient_normals(normals, gt_pref, use_equiv)
-    normals = normals[true_reward @ normals.T > epsilon]
 
     alignment = cast(np.ndarray, np.all(test_rewards @ normals.T > 0, axis=1))
     assert alignment.shape == (
@@ -684,52 +689,51 @@ def make_traj_opt_align(
     parallel: Optional[Parallel] = None,
     n_test_states: Optional[int] = None,
 ) -> np.ndarray:
-    with torch.no_grad():
-        state_shape = env.observation_space.sample().shape
-        action_shape = env.action_space.sample().shape
+    state_shape = env.observation_space.sample().shape
+    action_shape = env.action_space.sample().shape
 
-        if n_test_states is not None:
-            raw_states = np.array(
-                [
-                    flatten(env.observation_space, env.observation_space.sample())
-                    for _ in range(n_test_states)
-                ]
-            )
-        else:
-            n_test_states = 1
-            raw_states = np.array([env.state])
-        assert raw_states.shape == (n_test_states, *state_shape)
-
-        opt_plans = make_plans(
-            true_reward.reshape(1, 4),
-            raw_states,
-            traj_optimizer,
-            parallel,
-            action_shape,
-            memorize=True,
+    if n_test_states is not None:
+        raw_states = np.array(
+            [
+                flatten(env.observation_space, env.observation_space.sample())
+                for _ in range(n_test_states)
+            ]
         )
-        assert opt_plans.shape == (
-            1,
-            n_test_states,
-            50,
-            *action_shape,
-        ), f"opt_plans shape={opt_plans.shape} is not expected {(1,n_test_states,50,*action_shape)}"
-        opt_values: np.ndarray = rollout_plans(env, opt_plans, raw_states)
+    else:
+        n_test_states = 1
+        raw_states = np.array([env.state])
+    assert raw_states.shape == (n_test_states, *state_shape)
 
-        plans = make_plans(test_rewards, raw_states, traj_optimizer, parallel, action_shape)
-        assert plans.shape == (
-            len(test_rewards),
-            n_test_states,
-            50,
-            *action_shape,
-        ), f"plans shape={plans.shape} is not expected {(len(test_rewards),n_test_states,50,*action_shape)}"
-        values = rollout_plans(env, plans, raw_states)
-        assert values.shape == (
-            len(test_rewards),
-            n_test_states,
-        ), f"Values shape={values.shape} is not expected {(len(test_rewards), n_test_states)}"
+    opt_plans = make_plans(
+        true_reward.reshape(1, 4),
+        raw_states,
+        traj_optimizer,
+        parallel,
+        action_shape,
+        memorize=True,
+    )
+    assert opt_plans.shape == (
+        1,
+        n_test_states,
+        50,
+        *action_shape,
+    ), f"opt_plans shape={opt_plans.shape} is not expected {(1,n_test_states,50,*action_shape)}"
+    opt_values: np.ndarray = rollout_plans(env, opt_plans, raw_states)
 
-        alignment = cast(np.ndarray, np.all(opt_values - values < epsilon, axis=1))
+    plans = make_plans(test_rewards, raw_states, traj_optimizer, parallel, action_shape)
+    assert plans.shape == (
+        len(test_rewards),
+        n_test_states,
+        50,
+        *action_shape,
+    ), f"plans shape={plans.shape} is not expected {(len(test_rewards),n_test_states,50,*action_shape)}"
+    values = rollout_plans(env, plans, raw_states)
+    assert values.shape == (
+        len(test_rewards),
+        n_test_states,
+    ), f"Values shape={values.shape} is not expected {(len(test_rewards), n_test_states)}"
+
+    alignment = cast(np.ndarray, np.all(opt_values - values < epsilon, axis=1))
     return alignment
 
 

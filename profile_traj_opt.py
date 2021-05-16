@@ -7,7 +7,7 @@ from typing import Literal, Optional, Sequence, Tuple, Union
 import fire  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
-from driver.gym.legacy_env import LegacyEnv
+from driver.gym_env.legacy_env import LegacyEnv
 from tensorflow.keras.optimizers import SGD, Adam  # type: ignore
 
 from active.simulation_utils import TrajOptimizer

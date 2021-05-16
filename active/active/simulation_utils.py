@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Dict, Final, Optional, Tuple, Union
+from typing import Callable, Dict, Final, Literal, Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt  # type: ignore
@@ -239,14 +239,20 @@ def get_feedback(simulation_object, input_A, input_B, query_type):
     return phi_A, phi_B, s
 
 
-def run_algo(criterion, simulation_object, w_samples, delta_samples, continuous: bool = False):
+def run_algo(
+    criterion: Literal["information", "volume", "random"],
+    env: Driver,
+    w_samples,
+    delta_samples,
+    continuous: bool = False,
+):
     """ Gets next pair of trajectories to ask for a preference over. """
     if criterion == "information":
-        return algos.information(simulation_object, w_samples, delta_samples, continuous)
+        return algos.information(env, w_samples, delta_samples, continuous)
     if criterion == "volume":
-        return algos.volume(simulation_object, w_samples, delta_samples, continuous)
+        return algos.volume(env, w_samples, delta_samples, continuous)
     elif criterion == "random":
-        return algos.random(simulation_object)
+        return algos.random(env)
     else:
         raise ValueError("There is no criterion called " + criterion)
 
