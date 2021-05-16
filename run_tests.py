@@ -94,6 +94,7 @@ def premake_test_rewards(
                 n_cpus=n_cpus,
                 overwrite=overwrite,
             )
+            logging.info(f"Done with replication {replication}")
         exit()
 
     outdir.mkdir(parents=True, exist_ok=True)
@@ -559,12 +560,12 @@ def make_test_rewards(
                 outdir=outdir,
                 overwrite=overwrite,
                 parallel=None,
-                return_epsilon=True,
             )
             for epsilon in new_epsilons
         ):
             test_rewards[epsilon] = (rewards, alignment)
 
+    logging.info(f"Writing generated test rewards to {reward_path}")
     pickle.dump(test_rewards, open(reward_path, "wb"))
     return test_rewards
 
@@ -637,9 +638,7 @@ def rewards_aligned(
     )
 
     # This test is prone to false positives, but a negative is always a true negative
-    random_test_alignment = make_gt_test_align(
-        test_rewards, n_questions, true_reward, epsilon, use_equiv
-    )
+    gt_test = make_gt_test_align(test_rewards, n_questions, true_reward, epsilon, use_equiv)
 
     # Start with traj opt alignment, then mask out all of the rewards that failed the gt test
     # x y z
@@ -648,9 +647,9 @@ def rewards_aligned(
     # 1 0 0 if y says it's misaligned, then it is
     # 1 1 1
     # This is just the & function
-    alignment = traj_opt_alignment & random_test_alignment
+    alignment = traj_opt_alignment & gt_test
 
-    n_masked = np.sum(make_traj_opt_align & np.logical_not(random_test_alignment))
+    n_masked = np.sum(gt_test & np.logical_not(gt_test))
     logging.info(f"Trajectory optimization labelling produced at least {n_masked} false positives")
 
     return alignment
@@ -670,7 +669,9 @@ def make_gt_test_align(
     normals = normals[true_reward @ normals.T > epsilon]
 
     alignment = cast(np.ndarray, np.all(test_rewards @ normals.T > 0, axis=1))
-    assert alignment.shape == (test_rewards.shape[0], normals.shape[0])
+    assert alignment.shape == (
+        test_rewards.shape[0],
+    ), f"alignment shape={alignment.shape} is not expected {test_rewards.shape[0]}"
     return alignment
 
 
