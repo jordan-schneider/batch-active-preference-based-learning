@@ -642,7 +642,7 @@ def rewards_aligned(
     )
 
     # This test is prone to false positives, but a negative is always a true negative
-    gt_test = make_gt_test_align(test_rewards, env, n_questions, true_reward, epsilon, use_equiv)
+    gt_test = make_gt_test_align(test_rewards, n_questions, true_reward, epsilon, use_equiv)
 
     # Start with traj opt alignment, then mask out all of the rewards that failed the gt test
     # x y z
@@ -661,12 +661,12 @@ def rewards_aligned(
 
 def make_gt_test_align(
     test_rewards: np.ndarray,
-    env: Driver,
     n_questions: int,
     true_reward: np.ndarray,
     epsilon: float,
     use_equiv: bool = False,
 ) -> np.ndarray:
+    env = Driver()
     trajs = make_random_questions(n_questions, env)
     _, normals = make_normals(trajs, env, use_equiv)
 
