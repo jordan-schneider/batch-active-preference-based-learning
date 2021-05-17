@@ -34,10 +34,10 @@ def orient_normals(
     assert_normals(normals, use_equiv, n_reward_features)
     assert preferences.shape == (normals.shape[0],)
 
-    if np.all(preferences == 0 or preferences == 1):
+    if np.all((preferences == 0) | (preferences == 1)):
         preferences = preferences * 2 - 1
 
-    assert np.all(preferences == 1 or preferences == -1)
+    assert np.all((preferences == 1) | (preferences == -1))
 
     oriented_normals = (normals.T * preferences).T
 
