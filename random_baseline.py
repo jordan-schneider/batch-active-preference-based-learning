@@ -11,7 +11,15 @@ from scipy.linalg import norm  # type: ignore
 
 from active.sampling import Sampler
 from active.simulation_utils import get_feedback, get_simulated_feedback
-from utils import append, load, make_reward_path, save_reward, update_inputs
+from utils import (
+    append,
+    load,
+    make_reward_path,
+    parse_replications,
+    save_reward,
+    setup_logging,
+    update_inputs,
+)
 
 
 def update_response(
@@ -52,19 +60,21 @@ def main(
     outdir: Path = Path("data/simulated/random/elicitation"),
     human: bool = False,
     reward_path: Optional[Path] = None,
-    n_replications: Optional[int] = None,
+    replications: Optional[str] = None,
     overwrite: bool = False,
+    verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ) -> None:
-    logging.basicConfig(level=logging.INFO)
-
     outpath = Path(outdir)
+    outpath.mkdir(parents=True, exist_ok=True)
+    setup_logging(verbosity=verbosity, log_path=outpath / "log.txt")
 
     if not human:
         assert reward_path is not None
         reward_dir, reward_name = make_reward_path(reward_path)
         reward_path = reward_dir / reward_name
 
-    if n_replications is not None:
+    if replications is not None:
+        replication_indices = parse_replications(replications)
         Parallel(n_jobs=-2)(
             delayed(main)(
                 query_type=query_type,
@@ -76,11 +86,9 @@ def main(
                 reward_path=reward_dir / str(i) / reward_name,
                 overwrite=overwrite,
             )
-            for i in range(1, n_replications + 1)
+            for i in replication_indices
         )
         exit()
-
-    outpath.mkdir(parents=True, exist_ok=True)
 
     if not human:
         assert reward_path is not None

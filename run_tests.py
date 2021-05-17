@@ -141,6 +141,7 @@ def simulated(
     skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
+    use_true_epsilon: bool = False,
     legacy_test_rewards: bool = False,
     replications: Optional[Union[str, Tuple[int, ...]]] = None,
     n_cpus: int = 1,
@@ -184,6 +185,7 @@ def simulated(
                 skip_noise_filtering=skip_noise_filtering,
                 skip_epsilon_filtering=skip_epsilon_filtering,
                 skip_redundancy_filtering=skip_redundancy_filtering,
+                use_true_epsilon=use_true_epsilon,
                 legacy_test_rewards=legacy_test_rewards,
                 n_cpus=n_cpus,
                 overwrite_test_rewards=overwrite_test_rewards,
@@ -236,6 +238,8 @@ def simulated(
         skip_noise_filtering=skip_noise_filtering,
         skip_epsilon_filtering=skip_epsilon_filtering,
         skip_redundancy_filtering=skip_redundancy_filtering,
+        use_true_epsilon=use_true_epsilon,
+        true_reward=true_reward,
     )
 
     confusion_path, test_path = make_outnames(

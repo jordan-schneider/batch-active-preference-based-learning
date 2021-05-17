@@ -23,6 +23,8 @@ class TestFactory:
         skip_noise_filtering: bool = False,
         skip_epsilon_filtering: bool = False,
         skip_redundancy_filtering: bool = False,
+        true_reward: Optional[np.ndarray] = None,
+        use_true_epsilon: bool = False,
     ) -> None:
         """Creates a new test factory, filtering test questions.
 
@@ -51,11 +53,16 @@ class TestFactory:
         self.reward_dimension = reward_dimension
         self.equiv_probability = equiv_probability
         self.deterministic = deterministic
+
         self.use_mean_reward = use_mean_reward
+
         self.skip_dedup = skip_dedup
         self.skip_noise_filtering = skip_noise_filtering
         self.skip_epsilon_filtering = skip_epsilon_filtering
         self.skip_redundancy_filtering = skip_redundancy_filtering
+
+        self.true_reward = true_reward
+        self.use_true_epsilon = use_true_epsilon
 
     def sample_rewards(
         self,
@@ -123,6 +130,9 @@ class TestFactory:
             reward = np.mean(rewards, axis=0)
             logging.info(f"Mean reward for epsilon filtering={reward}")
             filtered_indices = filtered_normals @ reward > epsilon
+        elif self.use_true_epsilon:
+            assert self.true_reward is not None, "Must specify true reward to compute true epsilon."
+            filtered_indices = filtered_normals @ self.true_reward > epsilon
         elif delta is not None:
             opinions = np.dot(rewards, filtered_normals.T).T
             correct_opinions = opinions > epsilon
