@@ -7,10 +7,10 @@
 			"path": "../driver-env"
 		},
 		{
-			"path": "../TD3"
-		},
-		{
 			"path": "../vav_discrete"
 		}
 	],
+	"settings": {
+		"jupyter.jupyterServerType": "local"
+	},
 }
