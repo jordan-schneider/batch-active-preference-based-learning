@@ -18,9 +18,26 @@ def orient_normals(
     use_equiv: bool = False,
     n_reward_features: int = 4,
 ) -> np.ndarray:
+    """Orients halfplane normal vectors relative to preferences
+
+    Args:
+        normals (np.ndarray): (n, 4) array of difference of reward features
+        preferences (np.ndarray): 0/1 or +-1 vector of preferences
+        use_equiv (bool, optional): If equivalent preferences are allowed. Defaults to False.
+        n_reward_features (int, optional): Number of reward features. Defaults to 4.
+
+    Returns:
+        np.ndarray: normals oriented so that the prefered trajectory comes first
+    """
+
     """ Orients halfplane normal vectors relative to preferences. """
     assert_normals(normals, use_equiv, n_reward_features)
     assert preferences.shape == (normals.shape[0],)
+
+    if np.all(preferences == 0 or preferences == 1):
+        preferences = preferences * 2 - 1
+
+    assert np.all(preferences == 1 or preferences == -1)
 
     oriented_normals = (normals.T * preferences).T
 
@@ -28,10 +45,25 @@ def orient_normals(
     return oriented_normals
 
 
-def make_normals(inputs: np.ndarray, sim: Driver, use_equiv: bool):
-    """ Converts pairs of car inputs to trajectory preference normal vectors. """
-    assert len(inputs.shape) == 3
-    assert inputs.shape[1] == 2
+def make_normals(inputs: np.ndarray, sim: Driver, use_equiv: bool) -> Tuple[np.ndarray, np.ndarray]:
+    """Converts pairs of car inputs to trajectory preference normal vectors.
+
+    Args:
+        inputs (np.ndarray): (n, 2, 50, 2) array of pairs of 2-dimension actions for 50 timesteps
+        sim (Driver): Driving simulation to get features from
+        use_equiv (bool): Allow equivalent preferences?
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: input features and normal vectors
+    """
+    if len(inputs.shape) == 3:
+        assert inputs.shape[1] == 2
+    elif len(inputs.shape) == 4:
+        assert inputs.shape[1:] == (2, 50, 2)
+
+        # Convert inputs into flat action vectors of length 100, which is what feed expects
+        n = len(inputs)
+        inputs = inputs.reshape(n, 2, 100)
     normals = np.empty(shape=(inputs.shape[0], sim.num_of_features))
     input_features = np.empty(shape=(inputs.shape[0], 2, sim.num_of_features))
     for i, (input_a, input_b) in enumerate(inputs):
