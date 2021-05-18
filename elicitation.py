@@ -11,7 +11,7 @@ from joblib.parallel import Parallel, delayed  # type: ignore
 
 from active.sampling import Sampler
 from active.simulation_utils import get_feedback, get_simulated_feedback, run_algo
-from utils import append, load, make_reward_path, save_reward, update_inputs
+from utils import append, load, make_reward_path, parse_replications, save_reward, update_inputs
 
 
 def setup(criterion: str, query_type: str, outdir: Path, delta: Optional[float] = None):
@@ -33,62 +33,62 @@ def setup(criterion: str, query_type: str, outdir: Path, delta: Optional[float] 
 
 
 def simulated(
+    outdir: Path,
     criterion: Literal["information", "volume", "random"],
-    query_type: Literal["strict", "weak"],
     termination_threshold: float,
     n_reward_samples: int,
+    query_type: Literal["strict", "weak"] = "strict",
     equiv_size: Optional[float] = None,
     true_reward_path: Optional[Path] = None,
-    outdir: Path = Path("questions"),
     continuous: bool = False,
     overwrite: bool = False,
-    n_replications: int = 1,
+    replicaitons: Optional[str] = None,
 ):
     """ Generates a test by eliciting from a human simulated by a ground truth reward. """
-    n_replications = int(n_replications)
-
-    if n_replications > 1:
+    if replicaitons is not None:
+        replication_indices = parse_replications(replicaitons)
         if true_reward_path is not None:
             reward_dir, reward_name = make_reward_path(true_reward_path)
             Parallel(n_jobs=-2)(
                 delayed(simulated)(
-                    criterion,
-                    query_type,
-                    termination_threshold,
-                    n_reward_samples,
-                    equiv_size,
-                    reward_dir / str(i) / reward_name,
-                    Path(outdir) / str(i),
-                    continuous,
-                    overwrite,
+                    outdir=Path(outdir) / str(i),
+                    criterion=criterion,
+                    termination_threshold=termination_threshold,
+                    n_reward_smaples=n_reward_samples,
+                    query_type=query_type,
+                    equiv_size=equiv_size,
+                    true_reward_path=reward_dir / str(i) / reward_name,
+                    continuous=continuous,
+                    overwrite=overwrite,
                 )
-                for i in range(1, n_replications + 1)
+                for i in replication_indices
             )
         else:
             Parallel(n_jobs=-2)(
                 delayed(simulated)(
-                    criterion,
-                    query_type,
-                    termination_threshold,
-                    n_reward_samples,
-                    equiv_size,
-                    true_reward_path,
-                    Path(outdir) / str(i),
-                    continuous,
-                    overwrite,
+                    outdir=Path(outdir) / str(i),
+                    criterion=criterion,
+                    termination_threshold=termination_threshold,
+                    n_reward_smaples=n_reward_samples,
+                    query_type=query_type,
+                    equiv_size=equiv_size,
+                    continuous=continuous,
+                    overwrite=overwrite,
                 )
-                for i in range(1, n_replications + 1)
+                for i in replication_indices
             )
         exit()
 
     criterion, query_type, outdir = setup(criterion, query_type, outdir, delta=equiv_size)
 
-    simulation_object = Driver()
-    d = simulation_object.num_of_features
+    env = Driver()
+    d = env.num_of_features
 
     if true_reward_path is not None:
+        logging.info(f"Loading true reward from {true_reward_path}")
         true_reward = np.load(true_reward_path)
     else:
+        logging.info("Randomly generating true reward")
         true_reward = np.random.normal(size=(4,))
         true_reward = true_reward / np.linalg.norm(true_reward)
         np.save(outdir / "true_reward.npy", true_reward)
@@ -96,9 +96,9 @@ def simulated(
     pickle.dump(
         {
             "criterion": criterion,
-            "query_type": query_type,
-            "epsilon": termination_threshold,
             "reward_iterations": n_reward_samples,
+            "stop_thresh": termination_threshold,
+            "query_type": query_type,
             "equiv_size": equiv_size,
             "continuous": continuous,
         },
@@ -123,9 +123,7 @@ def simulated(
                 sample_count=n_reward_samples, query_type=query_type, delta=equiv_size
             )
 
-            input_A, input_B, score = run_algo(
-                criterion, simulation_object, w_samples, delta_samples, continuous
-            )
+            input_A, input_B, score = run_algo(criterion, env, w_samples, delta_samples, continuous)
             logging.info(f"Score={score}")
 
             if score > termination_threshold:
@@ -133,7 +131,7 @@ def simulated(
                     a_inputs=input_A, b_inputs=input_B, inputs=inputs, outdir=outdir
                 )
                 phi_A, phi_B, preference = get_simulated_feedback(
-                    simulation=simulation_object,
+                    simulation=env,
                     input_A=input_A,
                     input_B=input_B,
                     query_type=query_type,

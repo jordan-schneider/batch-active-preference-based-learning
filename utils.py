@@ -7,11 +7,19 @@ from typing import Any, List, Literal, Optional, Tuple, Union
 import arrow
 import fire  # type: ignore
 import numpy as np
-from gym import Env
+from gym import Env  # type: ignore
 from numpy.linalg import norm
 from scipy.stats import multivariate_normal  # type: ignore
 
 from active.sampling import Sampler
+
+
+def safe_normalize(x: np.ndarray) -> np.ndarray:
+    """ Tries to normalize the input, but returns the input if anything goes wrong. """
+    norm = np.linalg.norm(x)
+    if np.isfinite(norm) and norm != 0.0:
+        x /= norm
+    return x
 
 
 def rollout(actions: np.ndarray, env: Env, start: np.ndarray) -> float:

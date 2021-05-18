@@ -16,6 +16,7 @@ from utils import (
     load,
     make_reward_path,
     parse_replications,
+    safe_normalize,
     save_reward,
     setup_logging,
     update_inputs,
@@ -26,8 +27,8 @@ def update_response(
     input_features: Optional[np.ndarray],
     normals: Optional[np.ndarray],
     preferences: Optional[np.ndarray],
-    phi_A,
-    phi_B,
+    phi_A: np.ndarray,
+    phi_B: np.ndarray,
     preference: int,
     outdir: Path,
 ):
@@ -40,21 +41,18 @@ def update_response(
     return input_features, normals, preferences
 
 
-def make_random_questions(n_questions: int, simulation_object) -> np.ndarray:
-    lower_input_bound = [x[0] for x in simulation_object.feed_bounds]
-    upper_input_bound = [x[1] for x in simulation_object.feed_bounds]
+def make_random_questions(n_questions: int, env: Driver) -> np.ndarray:
     inputs = np.random.uniform(
-        low=2 * lower_input_bound,
-        high=2 * upper_input_bound,
-        size=(n_questions, 2 * simulation_object.feed_size),
+        low=env.ctrl_bounds[0],
+        high=env.ctrl_bounds[1],
+        size=(n_questions, 2, env.total_time, env.input_size),
     )
-    inputs = np.reshape(inputs, (n_questions, 2, -1))
     return inputs
 
 
 def main(
-    query_type: Literal["strict", "weak"],
     n_questions: int,
+    query_type: Literal["strict", "weak"] = "strict",
     equiv_size: float = 1.1,
     reward_iterations: int = 100,
     outdir: Path = Path("data/simulated/random/elicitation"),
@@ -77,14 +75,15 @@ def main(
         replication_indices = parse_replications(replications)
         Parallel(n_jobs=-2)(
             delayed(main)(
-                query_type=query_type,
                 n_questions=n_questions,
+                query_type=query_type,
                 equiv_size=equiv_size,
                 reward_iterations=reward_iterations,
                 outdir=outpath / str(i),
                 human=human,
                 reward_path=reward_dir / str(i) / reward_name,
                 overwrite=overwrite,
+                verbosity=verbosity,
             )
             for i in replication_indices
         )
@@ -95,23 +94,26 @@ def main(
         if not reward_path.exists():
             logging.warning("Reward path given does not exist, generating random reward.")
             true_reward = np.random.default_rng().normal(loc=0, scale=1, size=(4,))
-            true_reward = true_reward / norm(true_reward)
+            true_reward = safe_normalize(true_reward)
             np.save(reward_path, true_reward)
         else:
             true_reward = np.load(reward_path)
 
     pickle.dump(
         {
-            "query_type": query_type,
             "n_questions": n_questions,
+            "query_type": query_type,
             "equiv_size": equiv_size,
             "reward_iterations": reward_iterations,
+            "human": human,
         },
         open(outpath / "flags.pkl", "wb"),
     )
 
     normals = load(outpath / "normals.npy", overwrite=overwrite)
     preferences = load(outpath / "preferences.npy", overwrite=overwrite)
+    # TODO(joschnei): Make class for inputs, dimensions are too difficult to reason about
+    # (N, 2, 100)
     inputs = load(outpath / "inputs.npy", overwrite=overwrite)
     input_features = load(outpath / "input_features.npy", overwrite=overwrite)
 
@@ -138,7 +140,7 @@ def main(
 
     # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
     new_questions = n_questions - inputs.shape[0] if inputs is not None else n_questions
-    questions = make_random_questions(n_questions=new_questions, simulation_object=env)
+    questions = make_random_questions(n_questions=new_questions, env=env)
 
     if inputs is not None:
         assert input_features is not None

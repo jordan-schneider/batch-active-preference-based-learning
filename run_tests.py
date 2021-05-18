@@ -75,6 +75,8 @@ def premake_test_rewards(
 ):
     """ Finds test rewards for each experiment. """
     outdir.mkdir(parents=True, exist_ok=True)
+    # TODO(joschnei): I'm making some dangerous logging decisions. Do I want to append to logs, or
+    # give logs unique names? I really need to pick at least one.
     setup_logging(verbosity, log_path=outdir / "log.txt")
 
     if replications is not None:
@@ -95,6 +97,7 @@ def premake_test_rewards(
                 use_equiv=use_equiv,
                 n_cpus=n_cpus,
                 overwrite=overwrite,
+                verbosity=verbosity,
             )
             logging.info(f"Done with replication {replication}")
         exit()

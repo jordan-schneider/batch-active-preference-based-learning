@@ -1,12 +1,19 @@
+from typing import Callable
+
 import numpy as np
 import scipy.optimize as opt  # type: ignore
+from driver.legacy.models import Driver
 
 
-def volume_objective_psi(psi_set, w_samples, delta_samples):
+def volume_objective_psi(
+    normals: np.ndarray, w_samples: np.ndarray, delta_samples: np.ndarray
+) -> float:
     delta_samples = delta_samples.reshape(-1, 1)
-    dR = w_samples.dot(psi_set.T)
-    p1 = 1 / (1 + np.exp(delta_samples - dR))
-    p2 = 1 / (1 + np.exp(delta_samples + dR))
+    value_diff = w_samples @ normals.T
+
+    # TODO(joschnei): Log stabilize
+    p1 = 1 / (1 + np.exp(delta_samples - value_diff))
+    p2 = 1 / (1 + np.exp(delta_samples + value_diff))
     p_Upsilon = (np.exp(2 * delta_samples) - 1) * p1 * p2
 
     return p1.sum(axis=0) ** 2 + p2.sum(axis=0) ** 2 + p_Upsilon.sum(axis=0) ** 2
@@ -96,14 +103,20 @@ def optimize(simulation_object, w_samples, delta_samples, func):
     return opt_res[0][:z], opt_res[0][z:], np.abs(opt_res[1])
 
 
-def optimize_discrete(simulation_object, w_samples, delta_samples, func):
-    d = simulation_object.num_of_features
-    z = simulation_object.feed_size
+def optimize_discrete(
+    env: Driver,
+    w_samples: np.ndarray,
+    delta_samples: np.ndarray,
+    cost: Callable[[np.ndarray, np.ndarray, np.ndarray], float],
+):
+    d = env.num_of_features
+    z = env.feed_size
 
-    data = np.load("ctrl_samples/" + simulation_object.name + ".npz")
+    # TODO(joschnei): Insane that I'm loading here from a fixed directory. Move this outside.
+    data = np.load("ctrl_samples/" + env.name + ".npz")
     inputs_set = data["inputs_set"]
     psi_set = data["psi_set"]
-    f_values = func(psi_set, w_samples, delta_samples)
+    f_values = cost(psi_set, w_samples, delta_samples)
     id_input = np.argmin(f_values)
     return inputs_set[id_input, :z], inputs_set[id_input, z:], np.abs(f_values[id_input])
 
@@ -115,14 +128,14 @@ def volume(simulation_object, w_samples, delta_samples, continuous: bool = False
         return optimize_discrete(simulation_object, w_samples, delta_samples, volume_objective_psi)
 
 
-def information(simulation_object, w_samples, delta_samples, continuous: bool = False):
+def information(
+    env: Driver, w_samples: np.ndarray, delta_samples: np.ndarray, continuous: bool = False
+):
     if continuous:
         # Slower but more accurate, and will never ask the same question twice
-        return optimize(simulation_object, w_samples, delta_samples, information_objective)
+        return optimize(env, w_samples, delta_samples, information_objective)
     else:
-        return optimize_discrete(
-            simulation_object, w_samples, delta_samples, information_objective_psi
-        )
+        return optimize_discrete(env, w_samples, delta_samples, information_objective_psi)
 
 
 def random(simulation_object):

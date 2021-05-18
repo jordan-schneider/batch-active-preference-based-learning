@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
 import numpy as np
 
@@ -76,7 +76,7 @@ class Sampler:
         burn: int = 1000,
         thin: int = 50,
         step_size: float = 0.1,
-    ):
+    ) -> Tuple[np.ndarray, np.ndarray]:
         assert query_type in ["strict", "weak"], "There is no query type called " + query_type
         if query_type == "strict":
             delta = 0.0
