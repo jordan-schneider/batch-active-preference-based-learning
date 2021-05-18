@@ -8,6 +8,7 @@ from driver.car import LegacyPlanCar, LegacyRewardCar
 from driver.legacy.models import Driver  # type: ignore
 from driver.simulation_utils import legacy_car_dynamics_step_tf
 from driver.world import ThreeLaneCarWorld
+from utils import shape_compat
 
 from active import algos
 
@@ -49,7 +50,7 @@ def make_normals(inputs: np.ndarray, sim: Driver, use_equiv: bool) -> Tuple[np.n
     """Converts pairs of car inputs to trajectory preference normal vectors.
 
     Args:
-        inputs (np.ndarray): (n, 2, 50, 2) array of pairs of 2-dimension actions for 50 timesteps
+        inputs (np.ndarray): (n, 2, T, 2) array of pairs of 2-dimension actions for T timesteps
         sim (Driver): Driving simulation to get features from
         use_equiv (bool): Allow equivalent preferences?
 
@@ -57,13 +58,10 @@ def make_normals(inputs: np.ndarray, sim: Driver, use_equiv: bool) -> Tuple[np.n
         Tuple[np.ndarray, np.ndarray]: input features and normal vectors
     """
     if len(inputs.shape) == 3:
-        assert inputs.shape[1] == 2
+        shape_compat(inputs, (-1, 2, -1))
     elif len(inputs.shape) == 4:
-        assert inputs.shape[1:] == (2, 50, 2)
+        shape_compat(inputs, (-1, 2, -1, 2))
 
-        # Convert inputs into flat action vectors of length 100, which is what feed expects
-        n = len(inputs)
-        inputs = inputs.reshape(n, 2, 100)
     normals = np.empty(shape=(inputs.shape[0], sim.num_of_features))
     input_features = np.empty(shape=(inputs.shape[0], 2, sim.num_of_features))
     for i, (input_a, input_b) in enumerate(inputs):
@@ -80,7 +78,9 @@ def make_normals(inputs: np.ndarray, sim: Driver, use_equiv: bool) -> Tuple[np.n
     return input_features, normals
 
 
-def assert_normals(normals: np.ndarray, use_equiv: bool, n_reward_features: int = 4) -> None:
+def assert_normals(
+    normals: np.ndarray, use_equiv: bool = False, n_reward_features: int = 4
+) -> None:
     """ Asserts the given array is an array of normal vectors defining half space constraints."""
     shape = normals.shape
     assert len(shape) == 2, f"shape does not have 2 dimensions:{shape}"
@@ -274,11 +274,14 @@ def get_feedback(simulation_object, input_A, input_B, query_type):
 def run_algo(
     criterion: Literal["information", "volume", "random"],
     env: Driver,
-    w_samples,
-    delta_samples,
+    w_samples: np.ndarray,
+    delta_samples: np.ndarray,
     continuous: bool = False,
 ):
     """ Gets next pair of trajectories to ask for a preference over. """
+    shape_compat(w_samples, (-1, 4))
+    shape_compat(delta_samples, (-1,))
+
     if criterion == "information":
         return algos.information(env, w_samples, delta_samples, continuous)
     if criterion == "volume":
@@ -287,41 +290,6 @@ def run_algo(
         return algos.random(env)
     else:
         raise ValueError("There is no criterion called " + criterion)
-
-
-def compute_best(sim: Driver, w: np.ndarray, iter_count: int = 10) -> np.ndarray:
-    """ Finds best trajectory in sim given reward weight w. """
-    u = sim.ctrl_size
-    lower_ctrl_bound = [x[0] for x in sim.ctrl_bounds]
-    upper_ctrl_bound = [x[1] for x in sim.ctrl_bounds]
-    opt_val = np.inf
-    optimal_ctrl: Optional[np.ndarray] = None
-    for _ in range(iter_count):
-        temp_res = opt.fmin_l_bfgs_b(
-            path_return,
-            x0=np.random.uniform(low=lower_ctrl_bound, high=upper_ctrl_bound, size=(u)),
-            args=(sim, w),
-            bounds=sim.ctrl_bounds,
-            approx_grad=True,
-        )
-        if temp_res[1] < opt_val:
-            optimal_ctrl = temp_res[0]
-            opt_val = temp_res[1]
-    if optimal_ctrl is None:
-        raise RuntimeError("No solution found.")
-    logging.info(f"Optimal value={-opt_val}")
-    return optimal_ctrl
-
-
-def path_return(ctrl_array: np.ndarray, *args):
-    """ Computes the optimization objective of a search over actions. """
-    simulation_object = args[0]
-    w = np.array(args[1])
-    simulation_object.set_ctrl(ctrl_array)
-    features = np.array(simulation_object.get_features())
-    assert features.shape == (4,)
-    assert w.shape == (4,)
-    return -np.mean(features.dot(w))
 
 
 def play(sim: Driver, optimal_ctrl):
