@@ -64,6 +64,7 @@ def premake_test_rewards(
     epsilons: List[float] = [0.0],
     n_rewards: int = 100,
     n_test_states: Optional[int] = None,
+    n_gt_test_questions: Optional[int] = None,
     true_reward_name: Path = Path("true_reward.npy"),
     datadir: Path = Path(),
     outdir: Path = Path(),
@@ -91,6 +92,7 @@ def premake_test_rewards(
                 epsilons=epsilons,
                 n_rewards=n_rewards,
                 n_test_states=n_test_states,
+                n_gt_test_questions=n_gt_test_questions,
                 true_reward_name=true_reward_name,
                 datadir=datadir / str(replication),
                 outdir=outdir / str(replication),
@@ -111,6 +113,7 @@ def premake_test_rewards(
             true_reward=true_reward,
             n_rewards=n_rewards,
             n_test_states=n_test_states,
+            n_gt_test_questions=n_gt_test_questions,
             outdir=outdir,
             parallel=parallel,
             use_equiv=use_equiv,
@@ -128,6 +131,7 @@ def simulated(
     human_samples: List[int] = [1],
     n_reward_samples: int = 1000,
     n_test_states: Optional[int] = None,
+    n_gt_test_questions: Optional[int] = None,
     input_features_name: Path = Path("input_features.npy"),
     normals_name: Path = Path("normals.npy"),
     preferences_name: Path = Path("preferences.npy"),
@@ -172,6 +176,7 @@ def simulated(
                 human_samples=human_samples,
                 n_reward_samples=n_reward_samples,
                 n_test_states=n_test_states,
+                n_gt_test_questions=n_gt_test_questions,
                 input_features_name=input_features_name,
                 normals_name=normals_name,
                 preferences_name=preferences_name,
@@ -314,6 +319,7 @@ def simulated(
             true_reward=true_reward,
             n_rewards=n_rewards,
             n_test_states=n_test_states,
+            n_gt_test_questions=n_gt_test_questions,
             outdir=outdir,
             parallel=parallel,
             use_equiv=use_equiv,
@@ -531,6 +537,7 @@ def make_test_rewards(
     parallel: Parallel,
     n_test_states: Optional[int] = None,
     max_attempts: int = 10,
+    n_gt_test_questions: Optional[int] = None,
     use_equiv: bool = False,
     overwrite: bool = False,
 ) -> Dict[float, Tuple[np.ndarray, np.ndarray]]:
@@ -552,7 +559,7 @@ def make_test_rewards(
     if len(new_epsilons) > 0:
         logging.info(f"Creating new test rewards for epsilons: {new_epsilons}")
 
-    if n_test_states is not None and n_test_states > 1:
+    if (n_test_states is not None and n_test_states > 1) or len(new_epsilons) == 1:
         # Parallelize internally
         test_rewards.update(
             {
@@ -565,6 +572,7 @@ def make_test_rewards(
                     n_samples=n_test_states,
                     max_attempts=max_attempts,
                     outdir=outdir,
+                    n_gt_test_questions=n_gt_test_questions,
                     overwrite=overwrite,
                     parallel=parallel,
                 )[:2]
@@ -581,6 +589,7 @@ def make_test_rewards(
                 epsilon=epsilon,
                 n_samples=n_test_states,
                 max_attempts=max_attempts,
+                n_gt_test_questions=n_gt_test_questions,
                 outdir=outdir,
                 overwrite=overwrite,
                 parallel=None,
@@ -604,6 +613,7 @@ def find_reward_boundary(
     outdir: Path,
     parallel: Parallel,
     n_samples: Optional[int] = None,
+    n_gt_test_questions: Optional[int] = None,
     overwrite: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, float]:
     """ Finds a ballanced set of test rewards according to a critic and epsilon. """
@@ -623,6 +633,7 @@ def find_reward_boundary(
         epsilon=epsilon,
         parallel=parallel,
         n_test_states=n_samples,
+        n_questions=n_gt_test_questions,
     )
 
     search = TestRewardSearch.load(epsilon=epsilon, path=outdir / "search.pkl", overwrite=overwrite)
