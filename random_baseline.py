@@ -43,8 +43,8 @@ def update_response(
 
 def make_random_questions(n_questions: int, env: Driver) -> np.ndarray:
     inputs = np.random.uniform(
-        low=env.ctrl_bounds[0],
-        high=env.ctrl_bounds[1],
+        low=-1,
+        high=1,
         size=(n_questions, 2, env.total_time, env.input_size),
     )
     return inputs
@@ -141,6 +141,7 @@ def main(
     # Questions and inputs are duplicated, but this keeps everything consistent for the hot-load case
     new_questions = n_questions - inputs.shape[0] if inputs is not None else n_questions
     questions = make_random_questions(n_questions=new_questions, env=env)
+    logging.debug(f"questions={questions[:10]}")
 
     if inputs is not None:
         assert input_features is not None
