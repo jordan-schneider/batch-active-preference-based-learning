@@ -132,7 +132,13 @@ class TestFactory:
             filtered_indices = filtered_normals @ reward > epsilon
         elif self.use_true_epsilon:
             assert self.true_reward is not None, "Must specify true reward to compute true epsilon."
-            filtered_indices = filtered_normals @ self.true_reward > epsilon
+            logging.debug("Using true epsilon for epsilon delta filtering")
+            value_diffs = filtered_normals @ self.true_reward
+            logging.debug(
+                f"true reward={self.true_reward}, normals={filtered_normals}, value diffs={value_diffs}"
+            )
+            # logging.debug(f"min value diff={np.min(value_diffs)}, max={np.max(value_diffs)}")
+            filtered_indices = value_diffs > epsilon
         elif delta is not None:
             opinions = np.dot(rewards, filtered_normals.T).T
             correct_opinions = opinions > epsilon

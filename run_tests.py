@@ -193,6 +193,7 @@ def simulated(
                 n_cpus=n_cpus,
                 overwrite_test_rewards=overwrite_test_rewards,
                 overwrite_results=overwrite_results,
+                verbosity=verbosity,
             )
         exit()
 
@@ -244,6 +245,17 @@ def simulated(
         use_true_epsilon=use_true_epsilon,
         true_reward=true_reward,
     )
+    logging.info(
+        f"""Filtering settings:
+    # reward samples={n_reward_samples},
+    use mean reward={use_mean_reward},
+    skip duplicates={skip_remove_duplicates}
+    skip noise={skip_noise_filtering}
+    skip epsilon={skip_epsilon_filtering}
+    skip redundancy={skip_redundancy_filtering}
+    use true epsilon={use_true_epsilon}
+    """
+    )
 
     confusion_path, test_path = make_outnames(
         outdir,
@@ -285,11 +297,16 @@ def simulated(
 
         assert_normals(normals, use_equiv)
     else:
-        preferences = elicited_preferences
-        input_features = elicited_input_features
+        max_n = max(human_samples)
+        preferences = elicited_preferences[:max_n]
+        input_features = elicited_input_features[:max_n]
+        logging.debug(f"elicited_normals={elicited_normals[:10]}")
         normals = orient_normals(
-            elicited_normals, elicited_preferences, use_equiv, n_reward_features
+            elicited_normals[:max_n], preferences, use_equiv, n_reward_features
         )
+        logging.debug(f"normals={normals[:10]}")
+
+        assert np.all(true_reward @ normals.T >= 0)
 
     if not legacy_test_rewards:
         test_rewards = make_test_rewards(
@@ -898,6 +915,8 @@ def run_gt_experiment(
     # TODO(joschnei): Really need to make this a fixed set common between comparisons.
 
     filtered_normals = normals[:n_human_samples]
+    input_features = input_features[:n_human_samples]
+    preferences = preferences[:n_human_samples]
     filtered_normals, indices = factory.filter_halfplanes(
         inputs_features=input_features,
         normals=filtered_normals,
