@@ -2,7 +2,7 @@
 performance. """
 
 import logging
-import pickle
+import pickle as pkl
 from functools import partial
 from itertools import product
 from pathlib import Path
@@ -211,7 +211,7 @@ def simulated(
         # Argh defaults to parsing something as a string if its optional
         n_random_test_questions = int(n_random_test_questions)
 
-    flags = pickle.load(open(datadir / flags_name, "rb"))
+    flags = pkl.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
     equiv_probability = flags["equiv_size"]
 
@@ -348,8 +348,8 @@ def simulated(
         minimal_tests[experiment] = indices
         confusions[experiment] = confusion
 
-    pickle.dump(confusions, open(confusion_path, "wb"))
-    pickle.dump(minimal_tests, open(test_path, "wb"))
+    pkl.dump(confusions, open(confusion_path, "wb"))
+    pkl.dump(minimal_tests, open(test_path, "wb"))
 
 
 @arg("--epsilons", nargs="+", type=float)
@@ -382,7 +382,7 @@ def human(
 
     parallel = Parallel(n_jobs=n_cpus)
 
-    flags = pickle.load(open(datadir / flags_name, "rb"))
+    flags = pkl.load(open(datadir / flags_name, "rb"))
     query_type = flags["query_type"]
     equiv_probability = flags["equiv_size"]
 
@@ -459,8 +459,8 @@ def human(
         minimal_tests[experiment] = indices
         results[experiment] = result
 
-    pickle.dump(minimal_tests, open(test_path, "wb"))
-    pickle.dump(results, open(test_results_path, "wb"))
+    pkl.dump(minimal_tests, open(test_path, "wb"))
+    pkl.dump(results, open(test_results_path, "wb"))
 
 
 def compare_test_labels(
@@ -474,7 +474,7 @@ def compare_test_labels(
     if replications is not None:
         raise NotImplementedError("Replications not yet implemented")
 
-    starting_tests: Dict[float, Tuple[np.ndarray, np.ndarray]] = pickle.load(
+    starting_tests: Dict[float, Tuple[np.ndarray, np.ndarray]] = pkl.load(
         open(test_rewards_path, "rb")
     )
 
@@ -569,7 +569,7 @@ def make_test_rewards(
                     n_rewards=n_rewards,
                     use_equiv=use_equiv,
                     epsilon=epsilon,
-                    n_samples=n_test_states,
+                    n_test_states=n_test_states,
                     max_attempts=max_attempts,
                     outdir=outdir,
                     n_gt_test_questions=n_gt_test_questions,
@@ -599,7 +599,7 @@ def make_test_rewards(
             test_rewards[epsilon] = (rewards, alignment)
 
     logging.info(f"Writing generated test rewards to {reward_path}")
-    pickle.dump(test_rewards, open(reward_path, "wb"))
+    pkl.dump(test_rewards, open(reward_path, "wb"))
     return test_rewards
 
 
@@ -612,7 +612,7 @@ def find_reward_boundary(
     max_attempts: int,
     outdir: Path,
     parallel: Parallel,
-    n_samples: Optional[int] = None,
+    n_test_states: Optional[int] = None,
     n_gt_test_questions: Optional[int] = None,
     overwrite: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, float]:
@@ -620,7 +620,8 @@ def find_reward_boundary(
     env = LegacyEnv(reward=true_reward)
 
     # Don't parallelize here if we're only testing at one state
-    parallel = parallel if n_samples is None or n_samples <= 1 else None
+    logging.debug(f"# test states={n_test_states}")
+    parallel = None if n_test_states is None or n_test_states <= 1 else parallel
 
     new_rewards = partial(
         make_gaussian_rewards, n_rewards=n_rewards, use_equiv=use_equiv, mean=true_reward
@@ -632,7 +633,7 @@ def find_reward_boundary(
         true_reward=true_reward,
         epsilon=epsilon,
         parallel=parallel,
-        n_test_states=n_samples,
+        n_test_states=n_test_states,
         n_questions=n_gt_test_questions,
     )
 
@@ -849,7 +850,7 @@ def make_plans(
         rewards, (-1, 4)
     ), f"rewards shape={rewards.shape} is wrong, expected (-1, 4)"
 
-    if parallel:
+    if parallel is not None:
         input_batches = np.array_split(list(product(rewards, states)), parallel.n_jobs)
 
         logging.debug("Branching")
