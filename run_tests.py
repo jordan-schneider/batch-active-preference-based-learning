@@ -6,19 +6,8 @@ import pickle as pkl
 from functools import partial
 from itertools import product
 from pathlib import Path
-from typing import (
-    Dict,
-    Generator,
-    List,
-    Literal,
-    NamedTuple,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-    cast,
-)
+from typing import (Dict, Generator, List, Literal, NamedTuple, Optional,
+                    Sequence, Set, Tuple, Union, cast)
 
 import argh  # type: ignore
 import numpy as np
@@ -36,25 +25,23 @@ from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
-from active.simulation_utils import TrajOptimizer, assert_normals, make_normals, orient_normals
+from active.simulation_utils import (TrajOptimizer, assert_normals,
+                                     make_normals, orient_normals)
 from equiv_utils import add_equiv_constraints, remove_equiv
 from random_baseline import make_random_questions
 from testing_factory import TestFactory
-from utils import (
-    assert_nonempty,
-    assert_reward,
-    assert_rewards,
-    get_mean_reward,
-    load,
-    make_gaussian_rewards,
-    parse_replications,
-    rollout,
-    setup_logging,
-    shape_compat,
-)
+from utils import (assert_nonempty, assert_reward, assert_rewards,
+                   get_mean_reward, load, make_gaussian_rewards,
+                   parse_replications, rollout, setup_logging, shape_compat)
 
-Experiment = Tuple[float, float, int]
+Experiment = Tuple[float, Optional[float], int]
 
+input_features_name = Path("input_features.npy")
+normals_name = Path("normals.npy")
+preferences_name = Path("preferences.npy")
+true_reward_name = Path("true_reward.npy")
+flags_name = Path("flags.pkl")
+use_equiv = False
 
 # Top level functions callable from fire
 
@@ -68,7 +55,6 @@ def premake_test_rewards(
     true_reward_name: Path = Path("true_reward.npy"),
     datadir: Path = Path(),
     outdir: Path = Path(),
-    use_equiv: bool = False,
     replications: Optional[Union[str, Tuple[int, ...]]] = None,
     n_cpus: int = 1,
     overwrite: bool = False,
@@ -126,26 +112,19 @@ def premake_test_rewards(
 @arg("--human-samples", nargs="+", type=int)
 def simulated(
     epsilons: List[float] = [0.0],
-    deltas: List[float] = [0.05],
     n_rewards: int = 100,
     human_samples: List[int] = [1],
     n_reward_samples: int = 1000,
     n_test_states: Optional[int] = None,
     n_gt_test_questions: Optional[int] = None,
-    input_features_name: Path = Path("input_features.npy"),
-    normals_name: Path = Path("normals.npy"),
-    preferences_name: Path = Path("preferences.npy"),
-    true_reward_name: Path = Path("true_reward.npy"),
-    flags_name: Path = Path("flags.pkl"),
     datadir: Path = Path(),
     outdir: Path = Path(),
-    use_equiv: bool = False,
+    deltas: List[Optional[float]] = [None],
     use_mean_reward: bool = False,
     use_random_test_questions: bool = False,
-    use_cheating_questions: bool = False,
     n_random_test_questions: Optional[int] = None,
+    use_cheating_questions: bool = False,
     skip_remove_duplicates: bool = False,
-    skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
     use_true_epsilon: bool = False,
@@ -184,13 +163,11 @@ def simulated(
                 flags_name=flags_name,
                 datadir=datadir / str(replication),
                 outdir=outdir / str(replication),
-                use_equiv=use_equiv,
                 use_mean_reward=use_mean_reward,
                 use_random_test_questions=use_random_test_questions,
                 use_cheating_questions=use_cheating_questions,
                 n_random_test_questions=n_random_test_questions,
                 skip_remove_duplicates=skip_remove_duplicates,
-                skip_noise_filtering=skip_noise_filtering,
                 skip_epsilon_filtering=skip_epsilon_filtering,
                 skip_redundancy_filtering=skip_redundancy_filtering,
                 use_true_epsilon=use_true_epsilon,
@@ -244,7 +221,7 @@ def simulated(
         n_reward_samples=n_reward_samples,
         use_mean_reward=use_mean_reward,
         skip_dedup=skip_remove_duplicates,
-        skip_noise_filtering=skip_noise_filtering,
+        skip_noise_filtering=True,
         skip_epsilon_filtering=skip_epsilon_filtering,
         skip_redundancy_filtering=skip_redundancy_filtering,
         use_true_epsilon=use_true_epsilon,
@@ -255,7 +232,7 @@ def simulated(
     # reward samples={n_reward_samples},
     use mean reward={use_mean_reward},
     skip duplicates={skip_remove_duplicates}
-    skip noise={skip_noise_filtering}
+    skip noise={True}
     skip epsilon={skip_epsilon_filtering}
     skip redundancy={skip_redundancy_filtering}
     use true epsilon={use_true_epsilon}
@@ -265,7 +242,7 @@ def simulated(
     confusion_path, test_path = make_outnames(
         outdir,
         skip_remove_duplicates,
-        skip_noise_filtering,
+        True,
         skip_epsilon_filtering,
         skip_redundancy_filtering,
     )
@@ -368,10 +345,8 @@ def human(
     datadir: Path = Path("questions"),
     outdir: Path = Path("questions"),
     rewards_path: Optional[Path] = None,
-    use_equiv: bool = False,
     use_mean_reward: bool = False,
     skip_remove_duplicates: bool = False,
-    skip_noise_filtering: bool = False,
     skip_epsilon_filtering: bool = False,
     skip_redundancy_filtering: bool = False,
     n_cpus: int = 1,
@@ -408,21 +383,21 @@ def human(
         n_reward_samples=n_model_samples,
         use_mean_reward=use_mean_reward,
         skip_dedup=skip_remove_duplicates,
-        skip_noise_filtering=skip_noise_filtering,
+        skip_noise_filtering=True,
         skip_epsilon_filtering=skip_epsilon_filtering,
         skip_redundancy_filtering=skip_redundancy_filtering,
     )
 
     test_path = outdir / make_outname(
         skip_remove_duplicates,
-        skip_noise_filtering,
+        True,
         skip_epsilon_filtering,
         skip_redundancy_filtering,
         base="indices",
     )
     test_results_path = outdir / make_outname(
         skip_remove_duplicates,
-        skip_noise_filtering,
+        True,
         skip_epsilon_filtering,
         skip_redundancy_filtering,
         base="test_results",
@@ -796,7 +771,7 @@ def legacy_make_test_rewards(
     assert_reward(true_reward, use_equiv)
 
     trajs = make_random_questions(n_questions, Driver())
-    normals = make_normals(trajs, Driver(), use_equiv)
+    _, normals = make_normals(trajs, Driver(), use_equiv)
     gt_pref = true_reward @ normals.T > 0
     normals = orient_normals(normals, gt_pref, use_equiv)
     assert_normals(normals, use_equiv)
@@ -900,7 +875,7 @@ def run_gt_experiment(
     test_rewards: np.ndarray,
     test_reward_alignment: np.ndarray,
     epsilon: float,
-    delta: float,
+    delta: Optional[float],
     use_equiv: bool,
     n_human_samples: int,
     factory: TestFactory,
@@ -1025,7 +1000,7 @@ def run_human_experiment(
 
 def make_experiments(
     epsilons: Sequence[float],
-    deltas: Sequence[float],
+    deltas: Sequence[Optional[float]],
     n_human_samples: Sequence[int],
     overwrite: bool,
     experiments: Optional[Set[Experiment]] = None,
@@ -1033,6 +1008,7 @@ def make_experiments(
     """ Yields new experiments (unless overwrite is speificed)"""
     if overwrite:
         # TODO(joschnei): This is stupid but I can't be bothered to cast an iterator to a generator.
+
         for experiment in product(epsilons, deltas, n_human_samples):
             yield experiment
     else:
