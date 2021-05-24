@@ -83,11 +83,13 @@ def check(
         aligned_rewards: np.ndarray = rewards[aligned]
         misaligned_rewards = rewards[np.logical_not(aligned)]
 
-        for agreement in np.mean(np.dot(aligned_rewards, validation_test) > 0, axis=1):
+        for agreement in cast(np.ndarray, np.mean((aligned_rewards @ validation_test) > 0, axis=1)):
             agreements.loc[j] = [epsilon, delta, n, True, agreement]
             j += 1
 
-        for agreement in np.mean(np.dot(misaligned_rewards, validation_test) > 0, axis=1):
+        for agreement in cast(
+            np.ndarray, np.mean((misaligned_rewards @ validation_test) > 0, axis=1)
+        ):
             agreements.loc[j] = [epsilon, delta, n, False, agreement]
             j += 1
 

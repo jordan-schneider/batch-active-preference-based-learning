@@ -6,8 +6,19 @@ import pickle as pkl
 from functools import partial
 from itertools import product
 from pathlib import Path
-from typing import (Dict, Generator, List, Literal, NamedTuple, Optional,
-                    Sequence, Set, Tuple, Union, cast)
+from typing import (
+    Dict,
+    Generator,
+    List,
+    Literal,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+    cast,
+)
 
 import argh  # type: ignore
 import numpy as np
@@ -25,14 +36,22 @@ from gym.core import Env  # type: ignore
 from joblib import Parallel, delayed  # type: ignore
 from sklearn.metrics import confusion_matrix  # type: ignore
 
-from active.simulation_utils import (TrajOptimizer, assert_normals,
-                                     make_normals, orient_normals)
+from active.simulation_utils import TrajOptimizer, assert_normals, make_normals, orient_normals
 from equiv_utils import add_equiv_constraints, remove_equiv
 from random_baseline import make_random_questions
 from testing_factory import TestFactory
-from utils import (assert_nonempty, assert_reward, assert_rewards,
-                   get_mean_reward, load, make_gaussian_rewards,
-                   parse_replications, rollout, setup_logging, shape_compat)
+from utils import (
+    assert_nonempty,
+    assert_reward,
+    assert_rewards,
+    get_mean_reward,
+    load,
+    make_gaussian_rewards,
+    parse_replications,
+    rollout,
+    setup_logging,
+    shape_compat,
+)
 
 Experiment = Tuple[float, Optional[float], int]
 
@@ -51,7 +70,7 @@ def premake_test_rewards(
     epsilons: List[float] = [0.0],
     n_rewards: int = 100,
     n_test_states: Optional[int] = None,
-    n_gt_test_questions: Optional[int] = None,
+    n_gt_test_questions: int = 10000,
     true_reward_name: Path = Path("true_reward.npy"),
     datadir: Path = Path(),
     outdir: Path = Path(),
@@ -99,7 +118,7 @@ def premake_test_rewards(
             true_reward=true_reward,
             n_rewards=n_rewards,
             n_test_states=n_test_states,
-            n_gt_test_questions=n_gt_test_questions,
+            n_gt_test_questions=int(n_gt_test_questions),
             outdir=outdir,
             parallel=parallel,
             use_equiv=use_equiv,
@@ -116,7 +135,8 @@ def simulated(
     human_samples: List[int] = [1],
     n_reward_samples: int = 1000,
     n_test_states: Optional[int] = None,
-    n_gt_test_questions: Optional[int] = None,
+    n_gt_test_questions: int = 10000,
+    traj_opt: bool = False,
     datadir: Path = Path(),
     outdir: Path = Path(),
     deltas: List[Optional[float]] = [None],
@@ -296,7 +316,8 @@ def simulated(
             true_reward=true_reward,
             n_rewards=n_rewards,
             n_test_states=n_test_states,
-            n_gt_test_questions=n_gt_test_questions,
+            n_gt_test_questions=int(n_gt_test_questions),
+            traj_opt=traj_opt,
             outdir=outdir,
             parallel=parallel,
             use_equiv=use_equiv,
@@ -511,13 +532,18 @@ def make_test_rewards(
     outdir: Path,
     parallel: Parallel,
     n_test_states: Optional[int] = None,
+    traj_opt: bool = False,
     max_attempts: int = 10,
     n_gt_test_questions: Optional[int] = None,
     use_equiv: bool = False,
     overwrite: bool = False,
 ) -> Dict[float, Tuple[np.ndarray, np.ndarray]]:
     """ Makes test rewards sets for every epsilon and saves them to a file. """
-    traj_optimizer = TrajOptimizer(n_planner_iters=100, optim=tf.keras.optimizers.Adam(0.2))
+    traj_optimizer = (
+        TrajOptimizer(n_planner_iters=100, optim=tf.keras.optimizers.Adam(0.2))
+        if traj_opt
+        else None
+    )
 
     reward_path = outdir / "test_rewards.pkl"
 
@@ -580,7 +606,7 @@ def make_test_rewards(
 
 def find_reward_boundary(
     true_reward: np.ndarray,
-    traj_optimizer: TrajOptimizer,
+    traj_optimizer: Optional[TrajOptimizer],
     n_rewards: int,
     use_equiv: bool,
     epsilon: float,
@@ -632,7 +658,7 @@ def find_reward_boundary(
 
 
 def rewards_aligned(
-    traj_optimizer: TrajOptimizer,
+    traj_optimizer: Optional[TrajOptimizer],
     env: Env,
     true_reward: np.ndarray,
     test_rewards: np.ndarray,
@@ -644,24 +670,29 @@ def rewards_aligned(
 ) -> np.ndarray:
     """ Determines the epsilon-alignment of a set of test rewards relative to a critic and epsilon. """
     # This test can produce both false positives and false negatives
-    traj_opt_alignment = make_traj_opt_align(
-        traj_optimizer, env, true_reward, test_rewards, epsilon, parallel, n_test_states
-    )
 
     # This test is prone to false positives, but a negative is always a true negative
     gt_test = make_gt_test_align(test_rewards, n_questions, true_reward, epsilon, use_equiv)
 
-    # Start with traj opt alignment, then mask out all of the rewards that failed the gt test
-    # x y z
-    # 0 0 0
-    # 0 1 0 don't trust y when it says something is aligned if you failed the traj opt
-    # 1 0 0 if y says it's misaligned, then it is
-    # 1 1 1
-    # This is just the & function
-    alignment = traj_opt_alignment & gt_test
+    if traj_optimizer is not None:
+        traj_opt_alignment = make_traj_opt_align(
+            traj_optimizer, env, true_reward, test_rewards, epsilon, parallel, n_test_states
+        )
+        # Start with traj opt alignment, then mask out all of the rewards that failed the gt test
+        # x y z
+        # 0 0 0
+        # 0 1 0 don't trust y when it says something is aligned if you failed the traj opt
+        # 1 0 0 if y says it's misaligned, then it is
+        # 1 1 1
+        # This is just the & function
+        alignment = traj_opt_alignment & gt_test
 
-    n_masked = np.sum(gt_test & np.logical_not(gt_test))
-    logging.info(f"Trajectory optimization labelling produced at least {n_masked} false positives")
+        n_masked = np.sum(gt_test & np.logical_not(gt_test))
+        logging.info(
+            f"Trajectory optimization labelling produced at least {n_masked} false positives"
+        )
+    else:
+        alignment = gt_test
 
     return alignment
 
