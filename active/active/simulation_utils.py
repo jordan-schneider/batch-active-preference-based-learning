@@ -8,9 +8,17 @@ from driver.car import LegacyPlanCar, LegacyRewardCar
 from driver.legacy.models import Driver  # type: ignore
 from driver.simulation_utils import legacy_car_dynamics_step_tf
 from driver.world import ThreeLaneCarWorld
-from utils import shape_compat
 
 from active import algos
+
+
+def shape_compat(arr: np.ndarray, shape: Tuple[int, ...]) -> bool:
+    if len(arr.shape) != len(shape):
+        return False
+    for i, j in zip(arr.shape, shape):
+        if j != -1 and i != j:
+            return False
+    return True
 
 
 def orient_normals(
@@ -166,10 +174,7 @@ class TrajOptimizer:
         return loss
 
     def make_opt_traj(
-        self,
-        reward: np.ndarray,
-        start_state: Optional[np.ndarray] = None,
-        memorize: bool = False,
+        self, reward: np.ndarray, start_state: Optional[np.ndarray] = None, memorize: bool = False,
     ) -> Tuple[np.ndarray, float]:
         """ Finds the optimal sequence of actions under a given reward and starting state. """
         if start_state is not None:
