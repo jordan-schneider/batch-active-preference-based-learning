@@ -41,6 +41,9 @@ def update_response(
     return input_features, normals, preferences
 
 
+import multiprocessing
+
+
 def make_random_questions(n_questions: int, env: Driver) -> np.ndarray:
     inputs = np.random.uniform(
         low=-1,
@@ -73,7 +76,8 @@ def main(
 
     if replications is not None:
         replication_indices = parse_replications(replications)
-        Parallel(n_jobs=-2)(
+        n_cpus = min(multiprocessing.cpu_count() - 4, len(replication_indices))
+        Parallel(n_jobs=n_cpus)(
             delayed(main)(
                 n_questions=n_questions,
                 query_type=query_type,

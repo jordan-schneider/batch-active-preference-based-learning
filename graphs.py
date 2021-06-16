@@ -13,6 +13,7 @@ from sklearn.metrics import confusion_matrix  # type: ignore
 from typing_extensions import Literal  # type: ignore
 
 from run_tests import Experiment
+from utils import setup_logging
 
 Style = Union[Literal["POSTER"], Literal["PAPER"], Literal["ICML"]]
 
@@ -777,7 +778,7 @@ def gt(
     skip_easy: bool = True,
     verbosity: Literal["INFO", "DEBUG"] = "INFO",
 ) -> None:
-    logging.basicConfig(level=verbosity)
+    setup_logging(verbosity=verbosity)
     setup_plt(font_size, use_dark_background)
     max_n = int(max_n)
 
@@ -794,9 +795,11 @@ def gt(
         confusion = confusion[confusion.tp + confusion.fn != 100]
         confusion = confusion[confusion.tn + confusion.fp != 100]
 
-    plot_fpr(confusion, outdir, ablation, style, hue="n")
-    plot_fnr(confusion, outdir, ablation, style, hue="n")
-    plot_accuracy(confusion, outdir, ablation, hue="n", style=style)
+    best_delta = not confusion.delta.isna().all()
+
+    plot_fpr(confusion, outdir, ablation, style, hue="n", best_delta=best_delta)
+    plot_fnr(confusion, outdir, ablation, style, hue="n", best_delta=best_delta)
+    plot_accuracy(confusion, outdir, ablation, hue="n", best_delta=best_delta, style=style)
 
     print("Best accuracy:")
     print(confusion[confusion.acc == confusion.acc.max()])
